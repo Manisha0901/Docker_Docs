@@ -1,0 +1,4153 @@
+1. Manual Image Generation with docker commit
+
+Docker file consists of :
+
+FROM Alpine
+RUN apk add --update redis-server
+RUN apk add --update gcc
+CMD ["redis-server"]
+
+In terminal,
+
+#docker run -it alpine sh
+/#apk add --update redis   ---- redis will get installed
+
+In another terminal,
+
+Docker CLI will take snapshot of running container and assign default command to it and generate an image out of entire thing.
+
+#docker ps ---- to get id of running container
+#docker commit -c 'CMD ["redis-server"]' container_id 
+ output - will get new image id which is customized for our own uses
+
+#docker run new_image_id_created ------ will get new container from this image
+
+Section 4: Making Real Projects with Docker
+
+37. Project Outline ----- Running node js inside the container
+38. Node Server Setup
+
+#mkdir simpleweb
+#cd simpleweb
+#code .  ---- can use any editor
+
+In Simpleweb, will create package.json file for configuration to describe how our node application is going to work exactly.
+
+----package.json-----
+
+{
+  "dependencies":{
+    "express":"*"  ------ * is for any version to use
+  },
+  "scripts":{
+    "start":"node index.js"
+  }
+}
+
+Save and close the file.
+
+In same directory i.e. Simpleweb, create index.js file for server logic
+
+-----index.js-----
+const express = require('express');  ---- express library that we marked for dependency
+const app = express(); ---- library to create new app
+app.get('/', (req, res) => {   -------  set up one single route handler
+  res.send('Hi there');  -------  When we run application, it will visit browser and say Hi there
+});
+app.listen(8080, () => {    ------ app setup to listen on port 8080
+  console.log('Listening on port 8080');
+});
+
+Save the file.
+
+
+39. Completed server code ---- same as above just copy paste done from video.
+
+1) Create a new file called package.json and copy paste the following into it:
+
+{
+  "dependencies": {
+    "express": "*"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
+2) Create a new file called index.js and copy paste the following into it:
+
+const express = require('express');
+ 
+const app = express();
+ 
+app.get('/', (req, res) => {
+  res.send('How are you doing');
+});
+ 
+app.listen(8080, () => {
+  console.log('Listening on port 8080');
+});
+
+40. A Few Planned Errors 
+
+Create Dockerfile in Simpleweb directory
+
+#Specify a base image
+FROM alpine
+#Install some dependencies
+RUN npm install
+#Default command
+CMD ["npm", "start"]
+
+In terminal,
+
+#docker build .
+Error as /bin/sh npm not found, so we will change FROM node:alpine in Dockerfile and then build again.
+npm image will get pull but will receive warning for 2nd command (RUN npm install) such as no file or directory open for package.json.
+
+To ensure that package.json file is available before npm install, we will do below changes in Dockerfile.
+
+FROM node:alpine
+COPY ./ ./   ------ Copy package.json from current working dir to current working dir inside the container
+RUN npm install
+CMD ["npm", "start"]
+
+
+#docker build .  ----- new image will get created with some warnings for npm install
+
+-----------------------------------------------------------
+
+Will build again and tag the image
+
+#docker build -t dockerid/name_of_project(simpleweb) . ------- . is build context of current working dir including files and folders
+
+#docker run dockerid/simpleweb   ----- to run the container
+
+Output:
+> @ start
+> node index.js
+
+Listening on port 8080
+
+Check in browser - localhost:8080   -----received error as site can't be reached as request for port 8080 is not going through to the container
+
+To fix it, we need to do docker run with port mapping
+
+#docker run -p 8080:8080 <imageid or imagename> ---- port mapping i.e route incoming requests to this port on our local network/system will automatically forwarded to port inside the container.
+
+#docker run -p 8080:8080 dockerid/simpleweb ---- In browser, localhost:8080 --- you will get Hi there
+#docker run -p 5000:8080 dockerid/simpleweb ---- In browser, localhost:5000 --- you will get Hi there
+
+If you want to change the port inside the container, simultaneously change in index.js file also.
+
+
+45. Specifying a Working Directory
+
+#docker run -it dockerid/simpleweb sh ------ sh is to type commands inside the container
+/#ls   --- you will get files and folders including the ones you have copied in root directory with the help of Dockerfile
+
+You may get confuse or if any issue occurs in the root directory of the container - To avoid this, will change the path of working directory inside the container
+
+Dockerfile
+
+FROM node:alpine
+WORKDIR /usr/app
+COPY ./ ./
+RUN npm install
+CMD ["npm", "start"]
+
+Save dockerfile
+
+/#exit ---- exit the container
+#docker build -t dockerid/simpleweb .
+#docker run -p 8080:8080 dockerid/simpleweb   ------ check in browser-localhost:8080 ---Hi there
+
+We can either rerun docker run -it dockerid/simpleweb sh or docker exec command to setup second process inside the container.
+
+#docker ps
+#docker exec -it containerid sh  ---- -it for standard in and nice interactive way	
+/usr/app:#ls ----- will get project files and folders isolated nicely
+/usr/app:#cd /  --- root dir
+/#ls
+/#exit
+
+
+46. Unnecessary Rebuilds
+
+#docker run -p 8080:8080 dockerid/simpleweb   ------ check in browser-localhost:8080 ---Hi there
+Now you are doing some changes in index.js file like instead of 'Hi there', will give 'Bye there' response and will check in browser- localhost:8080 ----  still you are getting Hi there.
+
+So for the changes to be reflected in container, need to rebuild the image
+#docker build -t dockerid/simpleweb . -----Successfully build but this takes time to build dependencies again, so to avoid installing dependencies on every change in the file, need to split copy command as below.
+
+
+FROM node:alpine
+WORKDIR /usr/app
+COPY ./package.json ./
+RUN npm install
+COPY ./ ./ --------------cmd will get execute from this copy containing index.js and will not install dependencies
+CMD ["npm", "start"]
+
+#docker build -t dockerid/simpleweb . -----Successfully build with less time
+#docker run -p 8080:8080 dockerid/simpleweb   ------ check in browser-localhost:8080 ---Bye there
+
+
+Section 5:Docker Compose with Multiple local containers
+
+48. App Overview
+Here we will make new application ---- localhost:any port
+It will consist of No . of visits : 10 i.e how many times this page is visited will be counted on.
+
+For this, we will have node app in 1 container and redis in one container.
+
+49. App server Code
+
+#mkdir visits
+#cd visits
+
+In visits dir, we will create package.json, index.js files
+
+package.json
+
+{
+ 
+  "dependencies": {
+  
+    "express": "*",
+   
+    "redis": "2.8.0"
+  
+  },
+
+  "scripts": {
+  
+    "start": "node index.js"
+ 
+  }
+
+}
+
+
+index.js 
+
+const express = require('express');
+const redis= require('redis');
+
+const app = express();
+const client = redis.createClient();
+client.set('visits', 0);
+
+app.get('/', (req, res) => {
+  client.get('visits', (err, visits) => {
+     res.send('Number of visits is ' + visits);
+     client.set('visits', parseInt(visits) + 1);
+  });
+});
+
+app.listen(8081, () => {
+  console.log('Listening on port 8081');
+});
+
+
+51. Assembling a Dockerfile
+Creating Dockerfile in visits directory
+
+FROM node:alpine
+WORKDIR '/app'
+COPY package.json .
+RUN npm install
+COPY . .
+CMD ["npm", "start"]
+
+#docker build .
+Tagging image
+# docker build -t dockerid/visits:latest .
+
+
+52. Introducing Docker Compose
+
+#docker run dockerid/visits ---- error : Redis connection failed as no redis server connection found from application server,etc......
+Will run redis server from another container
+#docker run redis --- will pull image if not found
+
+No if you will run #docker run dockerid/visits, you will get same error as above. This is due to there is no communication between these 2 containers containing node app and redis server. In order to communicate between them, need to setup some network infrastructure.
+
+Options for containing these containers:
+1. Use Docker CLI's Network Features ---- Involve different commands that rewrite on every single time you start up different containers
+2. Use Docker Compose ----- It's a separate CLI tool and to keep you having out to write ton of different repetetive commands. start multiple docker containers at the same time and automatically connect them together with some networking.
+
+
+53. Docker Compose Files
+
+We will encode commands like docker build or docker run into a file in our project directory called docker-compose.yml file(contains all options we'd normally paste to Docker CLI).
+
+Inside YML file, once file is created, will then feed into Docker Compose CLI and it will be upto CLI to parse that file and create different containers with correct configuration specified.
+
+
+In project directory visits, create docker-compose.yml file.
+
+docker-compose.yml
+
+version: '3'  ----- version of docker compose
+services:     ----- 2 services we are using here i.e redis-server and node app
+  redis-server:
+    image: 'redis'
+  node-app:
+    build: .   ------ . will build node-app from dockerfile in project directory
+    ports:
+      - "4001:8081"
+
+
+54. Networking with Docker Compose
+
+By creating separate containers with docker compose, it has free access to communicate with each other without any network/port mapping.
+
+To access redis from node app, will do some changes in index.js file
+
+const express = require('express');
+const redis= require('redis');
+
+const app = express();
+const client = redis.createClient({
+  host: 'redis-server', ------------https://my-redis-server.com
+  port: 6379
+});  -------------------------------------------- location of redis server
+client.set('visits', 0);
+
+app.get('/', (req, res) => {
+  client.get('visits', (err, visits) => {
+     res.send('Number of visits is ' + visits);
+     client.set('visits', parseInt(visits) + 1);
+  });
+});
+
+
+app.listen(8081, () => {
+  console.log('Listening on port 8081');
+});
+
+
+
+55. Docker Compose Commands
+
+docker run myimage ----- docker-compose up
+
+docker build . and docker run myimage ------- docker-compose up --build
+
+In my project directroy visists, check files and folders available.
+#ls
+#docker-compose up
+
+When u create a new set of containers or services with docker compose, automatically it will make a network for you that's going to join those different containers together.
+Then image is built and next you will see creating visits_node-app and redis-server instance.
+Services of node-app and redis-server output you can see and atlast you will get ready to accept connection from redis-server and listening on port 4001 from node-app
+
+Check in browser-----localhost:4001 ----- Number of visists:0
+
+
+56. Stopping Docker Compose Containers
+
+#docker run -d redis ------ container started in background
+#docker ps
+#docker stop containerid
+
+Now when we have multiple docker containers running at background and if we need to stop them then it will be tiresome if we went to stop one by one, so with the help of docker compose we can stop all started containers with one single command.
+
+#docker-compose up -d ------ running containers in background
+#docker-compose down  ------ stopping containers
+#docker ps ------ nothing should be there after stopping containers
+
+
+57. Container Maintenance with Compose
+
+There might be a server running of some sort inside a container and may be that server experiences some error which leads to hang or crash, so in this case we need to set automatic restart of container.
+
+Eg:
+To crash server, some changes in index.js file ---- Anytime someone visits or route route when server crashes it will route to exit the process.
+
+const express = require('express');
+const redis= require('redis');
+const process = require('process');
+
+const app = express();
+const client = redis.createClient({
+  host: 'redis-server', ------------https://my-redis-server.com
+  port: 6379
+});  -------------------------------------------- location of redis server
+client.set('visits', 0);
+
+app.get('/', (req, res) => {
+  process.exit(0);
+  client.get('visits', (err, visits) => {
+     res.send('Number of visits is ' + visits);
+     client.set('visits', parseInt(visits) + 1);
+  });
+});
+
+
+app.listen(8081, () => {
+  console.log('Listening on port 8081');
+});
+
+
+#docker-compose up --build -------------------------Rebuild the container
+node-app exited with 0 -------- it means running contianer and software inside of it has crashed.Can also check in browser---localhost:4001-----Site error
+
+In another terminal, check #docker ps ---- you will see only 1 redis container running and there is no node-app.
+
+
+58.Automatic Container Restarts
+
+Status codes: ---- Will decide whether to restart containers or not.
+0 --------------------------- we exited because we wanted to and everything is OK.
+1,2,3,300,400,etc ----------- we exited because something went wrong.
+
+
+Restart Policies:
+no ------------------ Never attempt to restart this container of it stops or crashes.
+always -------------- Always attempt to restart it if container stops for any reason.
+on-failure ---------- Only restart if the container stops with an error code.
+unless-stopped ------ Always restart unless we (developers) forcibly start it.
+
+Ex for always policy ---- node-app container will automatically restart.
+
+docker-compose.yml
+
+version: '3'  ----- version of docker compose
+services:     ----- 2 services we are using here i.e redis-server and node app
+  redis-server:
+    image: 'redis'
+  node-app:
+    restart: always
+    build: .   ------ . will build node-app from dockerfile in project directory
+    ports:
+      - "4001:8081"
+
+#docker-compose up ------ will run container again.
+node-app exited with 0 and then container will automatically restart and node-app will listen on port 4001. ---- crosscheck in browser.
+
+
+restart: 'no' ----- always keep no in single or double quotes
+
+
+59. Container Status with Docker Compose
+
+#docker-compose up
+#docker-compose ps  ----- running container with docker-compose and it will run from the directory where docker-compose.yml file is available.
+
+
+Section 6: Creating a Production-Grade Workflow
+
+60. Development Workflow
+
+Develop an application that uses docker and push to some outside hosting service like AWS or Digital Ocean.
+Workflow of Develpment, Testing and Deployment will be repeating for an app.
+
+
+61. Flow Specifics
+
+Code pull from github then do some changes in the coding and push to github
+ in non-master branch, create pull request to merge with master, then code pushed to travis ci, tests run and then deploy to AWS Elastic Beanstalk.
+
+
+62. Docker's Purpose
+
+Docker is a tool in a normal development flow which makes tasks lot easier.
+
+
+63. Project Generation ---- Wrapping an react application inside docker container
+
+Check node js is installed or not and if not then install it.
+
+#node -v
+
+
+64. npx Create React App Generation
+how to install Create React App globally and generate the application. As of npm@5.2.0 we can now avoid this global install and instead use npx to generate the app on the fly to get the most current libraries and avoid many dependency conflicts. This is now the recommended way to generate an app with Create React App.
+
+Instead of this:
+
+npm install -g create-react-app
+
+create-react-app client
+
+Just do this:
+  
+npx create-react-app client
+
+Official docs on CRA usage with npx are available here:
+
+https://create-react-app.dev/docs/getting-started#quick-start
+
+
+65. More on Project Generation
+
+#npm install -g create-react-app  ------ package installation
+#create-react-app frontend -------------------- creating new react project
+
+
+66. Necessary Commands
+
+#cd frontend
+
+npm run start  ------- Starts up a development server. For development use only.
+npm run test   ------- Runs tests associated with the project
+npm run build  ------- Builds a production version of the application
+
+#npm run test  ----- going to start up a test runner, one test pass(App.test.js), press q to exit
+
+#npm run build ----- it will take all files in to a single file
+#ls
+#ls build
+#ls build/static
+#ls build/static/js
+
+#npm run start ---- start development server and automatically open tab in browser for localhost:3000 ------ welcome to React
+
+
+67. Creating the Dev Dockerfile
+
+We will create 2 Dockerfiles for 2 running containers, one for development and one for production.
+
+In frontend direcory,
+
+#code .
+
+Dockerfile.dev
+
+FROM node:alpine
+WORKDIR '/app'
+COPY package.json .
+RUN npm install
+COPY . .
+CMD ["npm", "run", "start"]
+
+#ls
+#docker build . ----- will give error as no dockerfile found
+
+to ensure that dockerfile.dev is considered for this, we need to specify the file that's going to build the image.
+
+#docker build -f Dockerfile.dev . ------- will load new image
+
+
+68. Duplicating Dependencies
+
+When we installed create-react-app tool, all dependencies were automatically installed.
+So at present we have 2 copies of dependency, to avoid this delete node_modules from frontend directory,  now rebuild and it will be faster.
+
+
+69. Starting the Container
+
+#docker run -p 3000:3000 container_or_image_id
+Check in browser ---- localhost:3000 ----- Welcome to React
+
+Open src directory, in App.js
+<p className="App-intro">
+ Hi there 
+</p>
+
+localhost:3000 ----- error as need to rebuild image or other solution.
+
+
+70. Quick Note for Windows Users
+
+If you are running on Windows, please read this: Create-React-App has some issues detecting when files get changed on Windows based machines.  To fix this, please do the following:
+
+In the root project directory, create a file called .env
+
+Add the following text to the file and save it: CHOKIDAR_USEPOLLING=true
+
+That's all!
+
+For more on why this is required, you can check out: https://facebook.github.io/create-react-app/docs/troubleshooting#npm-start-doesn-t-detect-changes
+
+
+
+71. Docker Volumes
+
+In last section, changes made in App.js and same was not reflected in the browser.
+
+Solution:
+We will not directly copy from local folder to docker container i.e from frontend dir to working dir app.
+
+We will use docker volume, it will set up a reference that's going to point back to local machine and give access to files and folders inside those folders on local machine.
+
+Port mapping : A container is a port inside the container to port outside the container with docker volume where essentially setting up a mapping from folder inside the container to a folder outside the container
+
+#docker run -p 3000:3000 -v /app/node_modules -v $(pwd):/app <imageid>
+
+-v $(pwd):/app --- map the pwd into /app folder
+
+
+
+72. Fix for ENOENT: no such file or directory, open '/app/package.json
+
+If you are on Windows Home and using Docker Toolbox with VirtualBox, then you might get this error when you try to follow the upcoming video and run docker-compose up --build:
+
+npm ERR! enoent ENOENT: no such file or directory, open '/app/package.json
+
+It looks like the version of VirtualBox that ships with Docker Toolbox has broken the shared folders and Windows volume mounts and the files we copy to our container are getting erased.
+
+You will need to upgrade your VirtualBox installation to the latest version 6 or higher that is available. You can find the downloader here:
+
+https://www.virtualbox.org/wiki/Downloads
+
+If you are still having trouble after making the upgrade please verify that you ran docker-compose down to destroy the old volumes and then docker-compose up --build again. Also make sure that your project files are located in C:\Users and not on a remote or external drive.
+
+
+73. Bookmarking Volumes fix for Windows
+In the upcoming lecture we will be running a few commands in the terminal. If you are on Windows, the command needs a minor change:
+
+docker run -p 3000:3000 -v /app/node_modules -v pwd:/app CONTAINER_ID
+
+Windows 10 Pro w/ Docker Desktop students have noted this variation to work with GitBash:
+
+docker run -p 3000:3000 -v /app/node_modules -v ${pwd}:/app CONTAINER_ID
+
+Make sure you replace CONTAINER_ID with your actual container. Do note, that depending on the terminal you are using, this also may not work (though, this was the most successful). There are many different variations that might work, so I will add them here as students note them.
+
+
+
+74. Bookmarking Volumes
+
+#docker run -p 3000:3000 -v /app/node_modules -v $(pwd):/app <imageid>
+
+-v $(pwd):/app ------------- map the pwd into /app folder
+-v /app/node_modules ------- put a bookmark on node_modules folder, here there is no mapping of this node_modules folder against anything.
+
+
+Check in browser ----- localhost:3000 ----- Hi there
+
+
+
+75. Shorthand with Docker Compose
+
+create docker-compose.yml file in project directory (frontend)
+
+docker-compose.yml
+
+version: '3'
+services:
+  web:
+    build: .
+    ports:
+      -"3000:3000"
+    volumes:
+      - /app/node_modules
+      - .:/app
+
+#docker-compose up ----- will get error as in docker-compose.yml build . will check for Dockerfile and here we have dockerfile.dev
+
+
+
+76. Overriding Dockerfile Selection
+
+version: '3'
+services:
+  web:
+    build: 
+      context: .  ---------------- look into current working directory for below line.
+      dockerfile: Dockerfile.dev ----- name of the dockerfile
+    ports:
+      -"3000:3000"
+    volumes:
+      - /app/node_modules
+      - .:/app
+
+#docker-compose up ----- Successfully build
+
+
+77. Do We need Copy?
+
+Change Bye there in App.js and check in browser --- localhost:3000 ---- Bye there
+
+Now in Dockerfile.dev, we are copying files/folders from project to working dir and then in docker-compose.yml, we are redirecting from working app dir to local machine under volumes.
+
+So if we want to delete COPY . . from dockerfile, we can delete it or else we can keep as we don't use docker-compose each and everytime.
+
+
+78. Executing Tests
+
+#docker build -f Dockerfile.dev . ----- Image will be build
+#docker run containerid npm run test ---- will run specific test suites
+#docker run -it containerid npm run test
+
+
+79. Live Updating Tests
+Will do some changes in App.test.js
+
+it('renders without crashing', () => {
+   const div = document.createElement('div');
+   ReactDOM.render(<App />, div);
+   ReactDOM.unmountComponentAtNode(div);
+});
+
+will copy the above and paste in the same file and save it.
+
+#docker run -it containerid npm run test ---- only 1 test suite will be there and after hitting Enter also, you will see only 1 test.
+
+Now to solve this, we will make some changes in docker-compose.yml as first approach.
+We will set up a second service and assign some volumes to it and the entire purpose of that service would be to run our tests.
+
+
+Second approach:
+#docker-compose up ------ bring up docker-compose instance with docker-compose
+Now rather than making second service inside docker compose file, we could instead attach to existing container that is created when we attach to it.
+We could then execute a command to start up our test suite inside there and that will give access to a container that already has all this volume mapping setup.
+
+In another terminal,
+
+#docker ps ------ get container id
+#docker exec -it containerid npm run test ----- will execute cmd npm run test in the container
+
+Output : you will see 2 tests now.
+
+Again if any changes done in App.test.js, accordingly you will see test results.
+This is the solution but same is not best solution to consider.
+
+
+
+80. Docker Compose for Running Tests
+
+First approach :  Creating second serive inside the docker-compose file to run tests.
+
+docker-compose.yml
+
+version: '3'
+services:
+  web:
+    build: 
+      context: .  ---------------- look into current working directory for below line.
+      dockerfile: Dockerfile.dev ----- name of the dockerfile
+    ports:
+      -"3000:3000"
+    volumes:
+      - /app/node_modules
+      - .:/app
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - /app/node_modules
+      - .:/app
+    command: ["npm", "run", "test"] ------- overwriting cmd of npm run start
+
+
+#docker-compose up --build   ------------ will build 2 containers: hosting for development server and 2nd for testing and rerunning any time that any file inside of our volume changes.
+
+Compiled successfully and can view in frontend browser --- localhost:3000
+
+Will do some changes in App.test.js again just copy paste and see test results accordingly.
+There is some problem in this approach also, here we don;t have ability to enter standard in output to that container, can't hit enter to rerun test, not getting any options inside container test suite.
+
+
+81. Tests Not Re-running on Windows
+If you are on Windows Pro or Windows Home you may have noticed that when adding a test or making a change to the App.test.js the tests are not re-running inside the container.
+
+While this works on macOS (and likely Linux), Jest watchers seem to be completely broken on all versions of Windows. We are looking into a potential fix or hack to get this working again and will update this note if we find one.
+
+
+
+82. Shortcomings on Testing
+
+#docker ps
+#docker attach containerid  ----------- not working as expected and is same as docker-compose
+#docker exec -it containerid sh ----- to execute command inside the container
+/app # ps
+
+Processes are running, 1 for npm, etc....
+
+
+83. Need for Nginx
+Nginx is an extremely popular web server, it doesn't have logic tied to it. It takes some incoming traffic and route it or respond to some static files.
+
+We will use nginx instance to produce index.html,....
+
+
+84. Multi-Step Docker Builds
+
+We will create second docker file which is going to make 2nd image that runs our application in production. We will build docker file that has something called multi step build process, inside docker file we will have 2 block configurations one is called build phase where alpine is used as base image, copy json file, install dependencies and run npm build which will help us in generating index.html, and so on files...
+And another phase is run phase where nginx is bas image, then we will reach over from run phase to build phase of 'npm run build' and get build directory where we have index.html, main.js, etc.....files and will copy this build phase entirely to run phase and lastly will start nginx as nginx was used here as base image.
+
+
+85. Implementing Multi-Step Builds
+
+In parent directory frontend, will create dockerfile.
+
+Dockerfile
+
+FROM node:alpine as builder
+WORKDIR '/app'
+COPY package.json .
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx
+COPY --from=builder /app/build /usr/share/nginx/html
+
+
+86. Running Nginx
+
+In terminal=>frontend directory,
+
+#docker build .
+#docker run -p 8080:80 imageid
+
+
+
+Section 7: Continuous Integration and Deployment with AWS
+
+87. Services Overview
+Github, Travis CI and AWS for the development flow.
+
+88. Github Setup
+
+In github, create new repository--docker-react
+Select Public and Create repository.
+
+In terminal-->frontend directory
+#git init
+#git add .
+#git commit -m "Initial Commit"
+#git remote add origin ....docker-react.git
+#git push origin master
+
+In github, you will see all files now of frontend directory.
+
+
+89. Travis CI Setup
+Travis will pull code from github once pushed.
+
+travis-ci.org ------ link to test and deploy code with confidence
+
+Click on RHS Icon--->Profile--->you will see green box or link saying to enable github repository, click on it and you will get all repositories in github.
+
+Search docker-react and click on switch as it will pull code once anything is pushed in github.
+
+
+90. Travis YML File Configuration
+.travis.yml file will ask travis to do exactly what we wanted it to do.
+The purpose of travis is to test our suite.
+
+Create .travis.yml file in frontend directory.
+.travis.yml
+
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t username/docker-react -f Dockerfile.dev .
+
+1. Tell travis we need a copy of docker running
+2. Build our image using Dockerfile.dev
+3. Tell travis how to run our test suite
+4. Tell travis how to deploy our code to AWS
+
+
+91. Fix for Failing Travis Builds
+In the upcoming lecture we will be adding a script to our .travis.yml file. Due to a change in how the Jest library works with Create React App, we need to make a small modification:
+
+script:
+  - docker run USERNAME/docker-react npm run test -- --coverage
+instead should be:
+
+script:
+  - docker run -e CI=true USERNAME/docker-react npm run test
+You can read up on the CI=true variable here:
+
+https://facebook.github.io/create-react-app/docs/running-tests#linux-macos-bash
+
+and enviornment variables in Docker here:
+
+https://docs.docker.com/engine/reference/run/#env-environment-variables
+
+Additionally, you may want to set the following property if your travis build fails with “rakefile not found” by adding to the top of your .travis.yml file:
+
+language: generic 
+
+
+92. A Touch More Travis Setup
+.travis.yml
+
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t username/docker-react -f Dockerfile.dev .
+
+script:
+  - docker run username/docker-react npm run test -- --coverage
+
+
+93. Automatic Build Creation
+In terminal frontend directory,
+#git add .
+#git commit -m "travis file added"
+#git push origin master
+
+Open Travis CI, you will see new build, check in job log.
+Once build successfully, it will be in green.
+
+94. AWS Elastic Beanstalk
+Login to AWS and create new application for target deployment
+aws.amazon.com--->Sign up and sign in
+
+Now to deploy our project, will make use of elastic beanstalk, search elastic beanstalk and click on it.
+RHS Click on Create New Application --->App Name-docker-react and create
+Next it will ask to create environment, select accordingly. here we are selecting for website, go down for base configuration---Platform ---select Preconfigured platform as Docker, App code --Sample appln and Create.
+
+95. More on Elastic Beanstalk
+
+In last section, we setup a new elastic beanstalk instance
+Once any request comes in it will go to load balancer and LB will check where traffic is less and accordingly route the request to the containers and apps will response to it.
+
+96. Travis Config for Deployment
+.travis.yml
+
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t username/docker-react -f Dockerfile.dev .
+
+script:
+  - docker run username/docker-react npm run test -- --coverage
+
+deploy:
+  provider: elasticbeanstalk
+  region: "us-west-2"  ---- from elastic beanstalk link (AWS)
+  app: "docker-react"
+  env: "Docker-env" ----- from elastic beanstalk(AWS)
+  bucket_name: "elasticbeanstalk-us-west-2-306476627547" -- This is S3 service, search for it.
+  bucket_path: "docker-react" ----  name of the app
+  on:
+    branch:master ----- whenever code is in branch master, need to deploy in AWS.
+
+97. Fix for Missing bucket_name error
+The dpl script Travis uses to deploy and do build verification is currently broken for many students. If you are getting a persistent missing bucket_name error with a failed build you will need to add the following to your .travis.yml file:
+
+deploy:
+  edge: true
+  provider: elasticbeanstalk
+  ...
+What this is doing is forcing Travis to use the v2 (experimental) version of the dpl script which does not have the bug.
+
+
+98. Travis Script Fix for access_key_id
+In the upcoming lecture we will be adding our AWS variables to the deploy script of the .travis.yml file. There is a slight change that will be required, otherwise you will get an error when Travis attempts to run your code.
+
+The code will now look like this:
+
+access_key_id: $AWS_ACCESS_KEY
+secret_access_key: $AWS_SECRET_KEY
+
+
+99. Automated Deployments
+We have to create user and generate secret key.
+
+In AWS, search iam and then create user-->docker-react-travis-ci--->attach exixting policies-->search for elastic beanstalk and create user.
+
+Now in .travis.yml, we will not provide secret key directly as we have kept github access to public and same will be applied to AWS so we will make use of a feature environment secrets provided by Travis CI.
+
+Go to travis-ci.org --->RHS More options-->Settings-->Environment variables
+Name-AWS_ACCESS_KEY  and paste value from AWS
+Name-AWS_SECRET_KEY  and paste value from AWS  and Add
+
+
+.travis.yml
+
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t username/docker-react -f Dockerfile.dev .
+
+script:
+  - docker run username/docker-react npm run test -- --coverage
+
+deploy:
+  provider: elasticbeanstalk
+  region: "us-west-2"  ---- from elastic beanstalk link (AWS)
+  app: "docker-react"
+  env: "Docker-env" ----- from elastic beanstalk(AWS)
+  bucket_name: "elasticbeanstalk-us-west-2-306476627547" -- This is S3 service, search for it.
+  bucket_path: "docker-react" ----  name of the app
+  on:
+    branch:master ----- whenever code is in branch master, need to deploy in AWS.
+  access_key_id: $AWS_ACCESS_KEY
+  secret_access_key:
+    secure: "$AWS_SECRET_KEY"
+
+In terminal frontend directory,
+#gst ---- git status
+#git add .
+#git commit -m "added travis file config"
+#git push origin master
+
+Now check in Travis CI, new build will be there.
+
+
+100. Exposing Ports Through the Dockerfile
+
+In Travis new build is completed and if you check in AWS, deploying is still in progress and if you refresh the page of docker, you will get default page only. This is due to port mapping not done.
+
+Now open Dockerfile in fronend directroy and add expose port 80
+
+Dockerfile
+
+FROM node:alpine as builder
+WORKDIR '/app'
+COPY package.json .
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx
+EXPOSE 80
+COPY --from=builder /app/build /usr/share/nginx/html
+
+Save file and then do git add, commit and push.
+
+101. AWS Build Still Failing?
+If you still see a failed deployment, try the following two steps:
+
+Fix One:
+
+The npm install command frequently times out on the t2.micro instance that we are using.  An easy fix is to bump up the instance type that Elastic Beanstalk is using to a t2.small.
+
+Note that a t2.small is outside of the free tier, so you will pay a tiny bit of money (likely less than one dollar if you leave it running for a few hours) for this instance.  Don't forget to close it down!  Directions for this are a few videos ahead in the lecture titled 'Environment Cleanup'.
+
+
+Fix Two:
+
+Try editing the 'COPY' line of your Dockerfile like so:
+
+COPY package*.json ./
+
+Sometimes AWS has a tough time with the '.' folder designation and prefers the long form ./
+
+102. Workflow with Github
+
+After the above changes in dockerfile and add, commit, push.....then redeployed the application over Travis CI and in AWS Elastic Beanstalk, there is new docker deployment.
+
+Click on docker link and app is ready.
+
+Workflow : we will make some changes in code and commit it to feature branch or push to github and then will make pull request and it will merge into master.
+
+#git checkout -b feature
+
+Change in App.js ----I was changed in feature branch and save the file.
+
+#git add .
+#git commit -m "changed app text"
+#git push origin feature
+
+In github respositroy, you will get feature branch,----RHS Compare and pull request ----it will copy all from feature branch and will merge it to master branch.
+
+
+103. Redeploy on Pull Request Merge
+
+All checks are passed, one for push in github and 2nd for merge in master
+Then pull merge request and confirm, next in travis ci new build is up.
+
+104. Deployment wrapup
+
+Check in AWS Elastic Beanstalk,Docker application.
+
+
+105. Environment Cleanup
+Remember, we need to delete the resources we created or you might end up paying real money for them.  To clean up the Elastic Beanstalk instance we created, do the following:
+
+1) Go to the Elastic Beanstalk dashboard, where you should see a page that looks like this:
+
+2) On the top right hand side click the 'Actions' button
+
+3) Click on 'Delete Application' then confirm the delete
+
+Note: it might take a few minutes for the dashboard to update and show that your app is being deleted.  Be a little patient!
+
+
+Section 8: Building a Multi-Container Application
+106. Single Container Deployment Issues
+-app was simple with no outside dependencies
+-image built was multiple times
+-how do we connect to database from a container
+
+
+107. Application overview
+Here we are creating Fibonacci Calculator.
+
+Fib sequence : 1 1 2 3 5 8 13......
+Fib Calculator
+Enter your index: 7 Submit
+Indices I have seen : 10,5,7
+Calculated Values:
+
+For index 7 | calculated 21
+For index 10 | calculated 89
+For index 5 | calculated 8
+
+
+108. A Quick Note
+In the next few videos we're going to write a lot of Javascript code.  You might not be interested in writing Javascript - if you don't want to put the app together from scratch then skip to Section #9.  Over there you'll find the completed code ready to download, so you can focus just on the Docker stuff and not worry about any Javascript!
+
+109. Application Architecture --- refer word doc
+
+110. Worker Process Setup
+
+In terminal root dir,
+#ls
+#mkdir complex
+#cd complex
+#mkdir worker
+#code .
+
+In worker directory, create package.json file
+package.json
+
+{
+  "dependencies": {
+    "nodemon": "1.18.3",
+    "redis": "2.8.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon"
+  }
+}
+
+
+key.js
+
+module.exports = {
+  redisHost: process.env.REDIS_HOST,
+  redisPort: process.env.REDIS_PORT
+};
+
+
+index.js
+
+const keys = require('./keys'); --- keys for configuration, connecting to redis
+const redis = require('redis');
+
+const redisClient =redis.createClient({
+  host: keys.redisHost,
+  port: keys.redisPort,
+  retry_strategy: () => 1000
+});
+
+const sub = redisClient.duplicate();
+
+function fib(index) {
+  if (index < 2) return 1;
+  return fib(index - 1) + fib(index - 2);
+}
+
+sub.on('message', (channel, message) => {
+  redisClient.hset('values;, message, fib(parseInt(message)));
+});
+sub.subscribe('insert');
+
+
+In terminal =>worker directory,
+#node index.js ---- you will get cannot find module redis (which is ok right no, just check there is no typo error for now)
+
+
+
+111. Express API Setup
+Make another directory - server next to worker directory.
+In server directory, create package.json file
+
+package.json
+
+{
+  "dependencies": {
+    "express": "4.16.3",
+    "pg": "7.4.3",
+    "redis": "2.8.0",
+    "cors": "2.8.4",
+    "nodemon": "1.18.3",
+    "body-parser": "*"
+  },
+  "scripts": {
+     "dev": "nodemon",
+     "start": "node index.js"
+  }
+}
+
+create keys.js in server dir,
+
+module.exports = {
+  redisHost: process.env.REDIS_HOST,
+  redisPort: process.env.REDIS_PORT,
+  pgUser: process.env.PGUSER,
+  pgHost: process.env.PGHOST,
+  pgDatabase: process.env.PGDATABASE,
+  pgPassword: process.env.PGPASSWORD,
+  pgPort: process.env.PGPORT,
+};
+
+
+112. Connecting to Postgres
+Create index.js file in server dir to connect with redis,postgres,express, react logic
+
+const keys = require('./keys');
+
+//Express App Setup
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
+//Postgres Client Setup  --- to communicate with Postgres
+const { Pool } = require('pg');
+const pgClient = new Pool({
+  user: keys.pgUser,
+  host: keys.pgHost,
+  database: keys.pgDatabase,
+  password: keys.pgPassword,
+  port: keys.pgPort
+});
+pgClient.on('error' () => console.log('Lost PG connection'));
+
+pgClient.query('CREATE TABLE IF NOT EXISTS values (number INT)')
+ .catch((err) => console.log(err));
+
+
+113. More Express API Setup
+Make sure express server has connection to redis.
+continue index.js file with the above.
+
+// Redis Client Setup
+const redis = require('redis');
+const redisClient = redis.createClient({
+  host: keys.redisHost,
+  port: keys.redisPort,
+  retry_strategy: () => 1000
+});
+const redisPublisher = redisClient.duplicate();
+
+// Express route handlers
+
+app.get('/', (req, res) => {
+  res.send('Hi');
+});
+
+app.get('/values/all', async (req, res) => {
+  const values = await pgClient.query('SELECT * from values');
+  
+  res.send(values.rows);
+});
+
+app.get('/values/current', async (req, res) => {
+  redisClient.hgetall('values', (err, values) => {
+    res.send(values);
+  });
+});
+
+app.post('/values', async (req, res) => {
+  const index = req.body.index;
+
+  if (ParseInt(index) > 40) {
+    return res.status(422).send('Index too high');
+  }
+
+  redisClient.hset('values', index, 'Nothing yet!');
+  redisPublisher.publish('insert', index);
+  pgClient.query('INSERT INTO values(number) VALUES($1)', [index]);
+
+  res.send({ working: true});
+});
+
+app.listen(5000, err => {
+  console.log('Listening');
+});
+
+
+In terminal server dir, #node index.js ---- cannot find module express
+
+
+114. npx Create React App Generation
+In the next lecture Stephen will be going over how to install Create React App globally and generate the application. As of npm@5.2.0 we can now avoid this global install and instead use npx to generate the app on the fly to get the most current libraries and avoid many dependency conflicts. This is now the recommended way to generate an app with Create React App.
+
+Instead of this:
+
+npm install -g create-react-app
+
+create-react-app client
+
+Just do this:
+
+npx create-react-app client
+
+Official docs on CRA usage with npx are available here:
+
+https://create-react-app.dev/docs/getting-started#quick-start
+
+
+115.Generating the React App
+In terminal complex dir,
+#create-react-app client
+
+116. Fetching Data in the React App
+#code .
+In client dir=>src=>OtherPage.js
+
+import React from 'react';
+import { Link } from 'react-router-dom';
+
+export default () => {
+  return (
+    <div>
+      Im some other page!
+      <Link to="/">Go back home</Link>
+    </div>
+  );
+};
+
+Create Fib.js in client->src dir,
+
+import React, { Component } from 'react';
+import axios from 'axiox';
+
+class Fib extends Component {
+  state = {
+    seenIndexes: [],
+    values: {},
+    index: ''
+  };
+
+  componentDidMount() {
+     this.fetchValues();
+     this.fetchindexes();
+  }
+
+  async fetchValues() {
+     const values = await axios.get('/api/values/current');
+     this.setState({ values: values.data });
+  }
+
+  async fetchValues() {
+     const seenIndexes = await axios.get('/api/values/all');
+     this.setState({ 
+       seenIndexes: seenIndexes.data
+     });
+  }
+}
+
+
+117. Rendering Logic in the App
+continue in Fib.js
+
+  handleSubmit = async (event) => {
+    event.preventDefault();
+  
+    await axios.post('/api/values', {
+      index: this.state.index
+    });
+    this.setState({ index: '' });
+  };
+  
+  renderseenIndexes() {
+    return this.state.seenIndexes.map(({ number }) => number).join(',
+  }
+
+  renderValues() {
+    const entries = [];
+
+    for (let key in this.state.values) {
+     entries.push(
+       <div key={key}>
+         For index {key} I calculated {this.state.values[key}]}
+       </div>
+     );
+    }
+
+    return entries; 
+  }
+
+  render() {
+    return (
+      <div>
+        <form onSubmit={this.handleSubmit}>
+          <label>Enter your index:</label>
+          <input 
+             value={this.state.index}
+             onChange={event => this.setState({ index: event.target.value })}
+          <input />
+          <button>Submit</button>
+        </form>
+        <h3>Indexes I have seen:</h3>
+        {this.renderSeenIndexes()}
+
+        <h3>Calculated Values:</h3>
+        {this.renderValues()}
+       </div>
+     );
+  }
+}
+
+
+export default Fib; ---- 118. Exporting the Fib Class
+
+119. Routing in the React App
+In client dir-package.json, add router-dom,axios library in dependencies.
+
+"dependencies": {
+  "react-router-dom": "4.3.1",
+  "axios": "0.18.0"
+},
+
+Open App.js in client dir,
+import { BrowserRouter as Router, Route, Link } from 'react-router-dom';
+import OtherPage from './OtherPage';
+import Fib from './Fib';
+class App extends Component {
+  render() {
+    return (
+      <Router>
+     After div,header,img,h1
+         <Link to ="/">Home</Link>
+         <Link to ="/otherpage">Other Page</Link>
+        </header>
+      Delete <p>tag and add <div>
+        <div>
+          <Route exact path="/" component={fib} />
+          <Route path="/otherpage" component={OtherPage} />
+        </div>
+       </div>
+      </Router>
+
+
+Section 9: "Dockerizing" Multiple Services
+
+120. Checkpoint Files
+If you skipped over putting the app together from scratch, download the attached Checkpoint.zip file.  You'll need it in the next section to get all caught up.
+
+Resources for this lecture
+114 - Checkpoint.zip
+
+121. Checkpoint Catchup ---- downlaoded and extracted 114 - Checkpoint.zip in complex directory.
+
+122. Dockerizing a React App-Again!
+Create Dockerfile.dev in client dir,
+
+FROM node:alpine
+WORKDIR '/app'
+COPY ./package.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "start"]
+
+In terminal-client dir,
+#docker build -f Dockerfile.dev .
+Image build successfully
+
+#docker run imageid ---- app, server will start and no error found, if any error check in code-114 - Checkpoint.zip
+
+123. Dockerizing Generic Node Apps
+
+Create Dockerfile.dev in server dir,
+
+FROM node:alpine
+WORKDIR "/app"
+COPY ./package.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "dev"]
+
+
+Create Dockerfile.dev in worker dir,
+
+FROM node:alpine
+WORKDIR "/app"
+COPY ./package.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "dev"]
+
+In terminal-server dir,
+#docker build -f Dockerfile.dev .
+#docker run imageid ----- connection refused(it is ok for now)
+
+In terminal-worker dir,
+#docker build -f Dockerfile.dev .
+#docker run imageid
+
+
+124.Adding Postgres as a Service
+Creating docker-compose.yml file in complex directory
+
+version: '3'
+services:
+  postgres:
+     image: 'postgres:latest' ---- check latest tag in hub.docker.com
+
+
+In terminal - complex dir,
+#docker-compose up ----- database system is ready to accept connections
+
+125. Docker-compose config
+Creating docker-compose.yml file in complex directory
+
+version: '3'
+services:
+  postgres:
+    image: 'postgres:latest' ---- check latest tag in hub.docker.com
+  redis:
+    image: 'redis:latest'
+  server:
+    build:
+      dockerfile: Dockerfile.dev
+      context: ./server ------ build image from this path using all files and folders
+    volumes:
+      - /app/node_modules
+      - ./server:/app ------- anything need to access in app dir except node_modules, it will redireact to server dir.
+
+
+126. Environment Variables with Docker Compose
+continue in docker-compose.yml file in complex directory
+
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379  ------ from hub.docker.com
+      - PGUSER=postgres
+      - PGHOST=postgres
+      - PGDATABASE=postgres
+      - PGPASSWORD=postgres_password  ----- from hub.docker.com
+      - PGPORT=5432 
+
+In terminal-complex dir,
+#docker-compose up ---- will rebuilt image from scratch
+
+127. The Worker and Client Services
+continue in docker-compose.yml file in complex directory
+
+    client:
+      build:
+        dockerfile: Dockerfile.dev
+        context: ./client
+      volumes:
+        - /app/node_modules
+        - ./client:/app
+    worker:
+      build:
+        dockerfile: Dockerfile.dev
+        context: ./worker
+      volumes:
+        - /app/node_modules
+        - ./worker:/app
+
+128. Nginx Path Routing-----Routing with the help of /api, refer word doc for more
+
+129. Routing with Nginx
+Creating nginx folder in the parent directory complex,
+Create default.conf in nginx
+
+upstream client {
+  server client:3000;
+}
+
+upstream server {
+  server api:5000;     ----- in docker-compose.yml, change service server to api
+}
+
+server {
+  listen 80;
+  location / {
+    proxy_pass http://client;
+  }
+
+  locaton /api {
+    rewrite /api/(.*) /$1 break;
+    proxy_pass http://api;
+  }
+}
+
+
+130. Building a Custom Nginx Image
+Go to hub.docker.com-->Explore-->nginx---- take image from nginx, we will copy nginx.conf in the container
+
+In nginx dir, create Dockerfile.dev
+FROM nginx
+COPY ./default.conf /etc/nginx/conf.d/default.conf
+
+
+In docker-compose.yml in complex dir, add nginx service between redis and api
+
+ nginx:
+   restart: always
+   build:
+     dockerfile: Dockerfile.dev
+     context: ./nginx
+   ports:
+     - '3050:80'
+
+131. Starting up Docker Compose
+In terminal in complex dir,
+#docker-compose up --build
+
+132. Nginx connect() failed - Connection refused while connecting to upstream
+A small number of students are hitting an edge case where the nginx upstream connection is failing after they run docker-compose up --build:
+
+connect() failed (111: Connection refused) while connecting to upstream, client:[DOCKER INTERNAL IP], server:, request: "GET / HTTP/1.1", upstream: [NETWORK IP]
+
+The solution they found was to add this to their nginx service in the docker-compose.yml file:
+
+  nginx:
+    depends_on:
+      - api
+      - client
+
+133. Fix for "I Calculated Nothing Yet" message
+Hi!  Its entirely possible that you might run into a bug or two when you start up this set of containers with docker-compose.
+
+Are you able to enter a number into the react app, but it appears to never be calculated, as seen in this screenshot?
+
+
+If that's the case, then you can try adding in environment variables to the 'worker' entry in the docker-compose file, like so:
+
+worker:
+  environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+Also, you can add depends_on to the api:
+
+api:
+  depends_on:
+    - postgres
+https://docs.docker.com/compose/compose-file/#depends_on
+
+After any changes, make sure you run a docker-compose down and then docker-compose up --build
+The next section also has a couple of other possible troubleshooting tips.
+
+
+134. Troubleshooting Startup Bugs
+In complex dir terminal,
+#docker-compose up
+
+Check in browser if Fibonacci app is working---- localhost:3050, app is working but in console getting error of websocket connection as we have not allowed to connect websocket.
+
+135. Opening Websocket Connections
+In complex-->nginx-->default.conf, here will expose one routing layer or one route nginx server that will allow websocket connecting with React app project.
+
+In default.conf, server between location / and /api,
+
+  location /sockjs-node {
+    proxy_pass http://client;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "Updgrade"
+  }
+
+In terminal complex dir,
+#docker-compose up --build
+#docker-compose up
+
+
+Check in browser Fibonacci app is working with no websocket error ---- localhost:3050
+
+
+Section 10: A Continuous Integration Workflow for Multiple Images
+136. Production Multi-Container Deployments --- refer word doc
+
+137. Production Dockerfiles
+Create Dockerfile in worker directory,
+
+FROM node:alpine
+WORKDIR "/app"
+COPY ./package.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "start"]
+
+Create Dockerfile in server directory,
+
+FROM node:alpine
+WORKDIR "/app"
+COPY ./package.json ./
+RUN npm install
+COPY . .
+CMD ["npm", "run", "start"]
+
+Create Dockerfile in nginx directory,
+
+FROM nginx
+COPY ./default.conf /etc/nginx/conf.d/default.conf
+
+
+138. Multiple Nginx Instances---- refer word doc
+
+139. Altering Nginx's Listen Port
+Create nginx folder in client dir and in nginx(client), create default.conf file
+
+server {
+  listen 3000;
+
+  location / {
+    root /usr/share/nginx/html;
+    index index.htnl index.htm;
+  }
+}
+
+
+Create Dockerfile in client dir,
+
+FROM node:alpine as builder
+WORKDIR '/app'
+COPY ./package.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+FROM nginx
+EXPOSE 3000
+COPY ./nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/build /usr/share/nginx/html
+
+140. Nginx fix for React Router
+In the last section we added on some Nginx config to the client side project, but I neglected to add one line that would get the Nginx server to work correctly when using React Router!
+
+In the client/nginx/default.conf file, please add the following line:
+
+server {
+  listen 3000;
+ 
+  location / {
+    root /usr/share/nginx/html;
+    index index.html index.htm;
+    try_files $uri $uri/ /index.html;  <<------Add this!!!!
+  }
+}
+
+
+141. Cleaning Up Tests
+Inside client dir->src->App.test.js
+Will delete 3 lines of test suite and save file---delete after it| 'renders without crashing' 
+
+142. Github and Travis Setup
+In terminal complex dir,
+#git init
+#git add .
+#git commit -m "initial commit"
+
+Login github.com--->New REpository-->Name:multi-docker->Public->Create
+In terminal complex dir,
+#git remote add origin .......multi-docker.git
+#git remote -v --------- list our current remotes
+#git push origin master
+
+Next create a link between github and travis
+Now go to travis-ci.org--->RHS Profile--->Check Repositories--->LHS Sync account from github
+
+Im Repositories, you will get multi-docker --->just slide left for build purpose.
+
+143. Fix for Failing Travis Builds
+In the upcoming lecture we will be adding a script to our .travis.yml file. Due to a change in how the Jest library works with Create React App, we need to make a small modification:
+
+script:
+  - docker run USERNAME/react-test npm test -- --coverage
+instead should be:
+
+script:
+  - docker run -e CI=true USERNAME/react-test npm test
+You can read up on the CI=true variable here:
+
+https://facebook.github.io/create-react-app/docs/running-tests#linux-macos-bash
+
+and enviornment variables in Docker here:
+
+https://docs.docker.com/engine/reference/run/#env-environment-variables
+
+Additionally, you may want to set the following property if your travis build fails with “rakefile not found” by adding to the top of your .travis.yml file:
+
+language: generic 
+
+
+144. Travis Configuration Setup
+In root complex dir, create travis.yml file
+
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t userid_of_docker/react-test -f ./client/Dockerfile.dev ./client
+  
+script:
+  - docker run dockeruserid/react-test npm test -- --coverage
+
+after_sucess:
+  - docker build -t dockeruserid/multi-client ./client
+  - docker build -t dockeruserid/multi-nginx ./nginx
+  - docker build -t dockeruserid/multi-server ./server
+  - docker build -t dockeruserid/multi-worker ./worker
+  # Log in to the docker CLI
+  
+  # Take those images and push them to docker hub
+
+145. Pushing Images to Docker Hub
+In terminal complex dir,
+#docker login
+
+Go to travis-ci.org, you will get multi-docker, More options-->Settings-->Environment Variables
+
+DOCKER_ID --- manisha
+DOCKER_PASSWORD --- pswd
+ Add
+
+Then some addition in travis.yml file
+sudo: required
+services:
+  - docker
+
+before_install:
+  - docker build -t userid_of_docker/react-test -f ./client/Dockerfile.dev ./client
+  
+script:
+  - docker run dockeruserid/react-test npm test -- --coverage
+
+after_sucess:
+  - docker build -t dockeruserid/multi-client ./client
+  - docker build -t dockeruserid/multi-nginx ./nginx
+  - docker build -t dockeruserid/multi-server ./server
+  - docker build -t dockeruserid/multi-worker ./worker
+  # Log in to the docker CLI
+  - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_ID" --password-stdin
+  # Take those images and push them to docker hub
+  - docker push dockeruserid/multi-client
+  - docker push dockeruserid/multi-nginx
+  - docker push dockeruserid/multi-server
+  - docker push dockeruserid/multi-worker
+
+In terminal complex dir,
+#git status
+#git add .
+#git commit -m "changed travis.yml"
+#git push origin master
+
+Now in travis, build should be there.
+
+146. Successful Image Building
+In travis, build completed successfully and now go to hub.docker.com, 4 new repositories are up there with the images pushed now.
+
+
+Section 11: Multi-Container Deployments to AWS
+147. Multi-Container Definition Files  --- refer word doc
+
+148. Finding Docs on Container Definitions --- refer word doc and google amazon ecs task definition.
+Select docs.aws.amazon.con----Container Definitions
+
+
+149. Adding Container Definitions to DockerRun
+Create Dockerrun.aws.json file in parent complex directory,
+
+{
+  "AWSEBDockerrunVersion": 2,
+  "containerDefinitions": [
+    {
+      "name": "client", ----- configuratio for client
+      "image": "dockeruserid/multi-client"
+      "hostname": "client" ----- service from docker-compose.yml
+    }
+  ]
+
+}
+
+150. More Container Definitions
+continue in Dockerrun.aws.json file in complex dir,
+
+{
+  "AWSEBDockerrunVersion": 2,
+  "containerDefinitions": [
+    {
+      "name": "client", ----- configuratio for client
+      "image": "dockeruserid/multi-client"
+      "hostname": "client" ----- service from docker-compose.yml
+      "essential": false -If something crashes here, it's ok, no need to stop other containers
+    },
+    {    
+      "name": "server", ----- configuratio for client
+      "image": "dockeruserid/multi-server"
+      "hostname": "server" ----- service from docker-compose.yml
+      "essential": false -If something crashes here, it's ok, no need to stop other containers
+    },
+    {    
+      "name": "worker", ----- configuratio for client
+      "image": "dockeruserid/multi-worker"
+      "hostname": "worker" ----- service from docker-compose.yml
+      "essential": false -If something crashes here, it's ok, no need to stop other containers
+    }
+  ]
+}
+
+
+151. Forming Container Links
+continue in Dockerrun.aws.json file in complex dir,
+{
+  "AWSEBDockerrunVersion": 2,
+  "containerDefinitions": [
+    {
+      "name": "client", ----- configuratio for client
+      "image": "dockeruserid/multi-client",
+      "hostname": "client", ----- service from docker-compose.yml
+      "essential": false -If something crashes here, it's ok, no need to stop other containers
+    },
+    {    
+      "name": "server", ----- configuratio for client
+      "image": "dockeruserid/multi-server",
+      "hostname": "api", ----- service from docker-compose.yml
+      "essential": false -If something crashes here, it's ok, no need to stop other containers
+    },
+    {    
+      "name": "worker", ----- configuratio for client
+      "image": "dockeruserid/multi-worker",
+      "hostname": "worker", ----- service from docker-compose.yml
+      "essential": false -If something crashes here, it's ok, no need to stop other containers
+    },
+    {    
+      "name": "nginx", ----- configuratio for client
+      "image": "dockeruserid/multi-nginx",
+      "hostname": "nginx", ----- service from docker-compose.yml
+      "essential": true,-(Atleast 1 essential should be true) If container crashes here, it will stop other containers too.
+      "portMappings": [
+        {
+          "hostPort": 80,
+          "containerPort": 80
+        }
+      ],
+      "links": ["client", "server"]
+    }
+  ]
+}
+
+To check any typo error, google json validator and validate this json file.
+
+
+152. Creating the EB Environment
+Login AWS and search for elastic beanstalk services--->Create New Application-multi-docker and create then click on create one now-->Select Web server environment-->
+Base configuration-->Platform : Preconfigured Platform---Multi-container Docker, Application code: Sample application--->Create Environment
+
+153. Managed Data Service Providers ---- refer word doc
+
+154. Overview of AWS VPC's and Security Groups --- refer word doc and 
+In AWS-->VPC Dashboard--->Default VPC is available, also can create VPC.(Check VPC is in same region in which you have created)
+In AWS, LHS Dashboard, select Security Groups-->you will see group MultiDocker.env vreated for elastic beanstalk instance.(Check inbound and outbound rules)
+
+
+155. RDS Database Creation
+In AWS, search RDS service and create database in that, select PostgreSL and tick enable free usage option-->Next-->Specify DB details
+Settings-->multi-docker-postgres
+Master username:postgres
+Master password : postgrespassword--->Next-->Network & Security--->Default VPC-->subnrt group:default-->Public access:No-->Create new VPC security group-->Database options
+Database name: fibvalues-->if want to setup backup then setup, default is 7 days-->Create database.
+
+156. ElasticCache Redis Creation
+In AWS, search service elastic cache,LHS click on Redis-->Create
+Cluster engine:Redis-->Redis Settings-->Name:multi-docker-redis-->Node typye : don't select default as it is very expensive, select the cheap one i.e cache.t2.micro(0.5 GB)
+Subnet group-->Create new-->Name:reis-group-->VPC ID: default VPC ID-->Subnets: tick all and Create.
+
+157. Creating a Custom Security Group
+In AWS, search VPC service--->LHS Security Group--->Create Security Group to communicate between 3 instances- postgres,redis,eb.
+Name tag:multi-docker, Group name: multi-docker, Description: Traffic for services in multi-docker app, VPC : Default VPC -->Yes, Create.
+Now select multi-docker security group and add inbound rule-->Type:Custom TCP Rule, Protocol:TCP, Port Range:5432-6379, source:sg....multi-docker and save
+
+158. Applying Security Groups to Resources
+In AWS, ElasticCache-->Redis-->Modify multi-docker-->VPC Security group:modify from default to multi-docker sg and modify.
+In AWS, RDS-->Instances-->select multi-docker-postgres-->Modify Security group:modify from default to multi-docker sg and modify.
+In AWS, Elastic Beanstalk-->Configuration-->Instances-->Modify-->EC2 Security group-->Modify Security group:modify from default to multi-docker sg and modify.
+
+159. Setting Environment Variables
+In AWS, Elastic Beanstalk Service-->Configuration-->Instances-->Modify Software-->Environment properties : REDIS_HOST - for value we need URL of Elasticcache instance, so will go to Service-->ElastiCache in new tab-->Redis-->multi-docker-redis-->Primary Endpoint:copy except :portno and paste in EB env properties.
+REDIS_PORT-6379
+PGUSER-postgres
+PGPASSWORD-postgrespassword
+PGHOST- need to go to RDS Dashboard-->Instances--open multi-docker-postgres instance-->connect endpoint address copy it and paste in PGHOST value of EB Env properties
+PGDATABASE-fibvalues
+PGBORT-5432---Apply
+
+160. IAM Keys for Deployment
+In AWS, IAM Services-->LHS Users-->Add User-->Username:multi-docker-deployer-->Attach existing policies directly-->select all AWS Managed Ploicy-->REview and Create User--->you will get access key id and secret access key
+
+Go to travis-ci.org-->multi-docker project-->Settings-->Environment Variables:
+AWS_ACCESS_KEY-copy from aws
+AWS_SECRET_KEY-copy from aws---->Add
+
+161. Travis Script Fix for access_key_id
+In the upcoming lecture we will be adding our AWS variables to the deploy script of the .travis.yml file. There is a slight change that will be required, otherwise you will get an error when Travis attempts to run your code.
+
+The code will now look like this:
+
+access_key_id: $AWS_ACCESS_KEY
+secret_access_key: $AWS_SECRET_KEY
+
+162. Fix for Missing bucket_name error
+The dpl script Travis uses to deploy and do build verification is currently broken for many students. If you are getting a persistent missing bucket_name error with a failed build you will need to add the following to your .travis.yml file:
+
+deploy:
+  edge: true
+  provider: elasticbeanstalk
+  ...
+What this is doing is forcing Travis to use the v2 (experimental) version of the dpl script which does not have the bug.
+
+163. Travis Deploy Script
+In complex dir, addition in travis.yml
+
+deploy:
+  provider:elasticbeanstalk
+  region: copy from aws url i.e. us-west-1
+  app: multi-docker
+  env: MultiDocker-env
+  bucket_name:copy from aws s3 service
+  bucket_path: docker-multi
+  on:
+    branch: master
+  access_key_id: $AWS_ACCESS_KEY
+  secret_access_key:
+    secure: $AWS_SECRET_KEY
+
+164. Container Memory Allocations
+Travis Build Successfully in travis-ci.org, check in AWS multi-docker instance for error,warning.
+
+Add memory in Dockerrun.aws.json for all container definitions, client, server, worker, nginx
+memory:128
+
+In terminal complex dir,
+#git status
+#git add .
+#git commit -m "added menory allocation"
+#git push origin master
+
+Then, build from travis to aws--- check in browsers
+
+165. Verifying Deployment
+In AWs, health check  is OK for multi-docker instance, if any error, check logs-->REquest logs-->Last 100 lines-->Download.
+
+Click on AWS app link and check the hosted app.
+
+166. A Quick App Change
+In complex-->client-->src-->App.js-->Changing Welcome to React to Fib Calculator and save file.
+Complete git add till git push
+
+167. Making Changes ---- Refresh the app link from AWS and see the changes.
+Also shut down resources used in AWS.
+
+168.Cleaning up AWS Resources
+Shut down EB,  RDS (postgres), Elasticache (redis) instance
+
+In AWS,Elastic Beanstalk-->RHS Actions-->Delete Applications
+In AWS,RDS-->Instances-->DB Instance-multi-docker-postgres-->Instance Actions-->Delete 
+In AWS,Elasticcache-->Redis-->select multi-docker-redis-->Delete 
+In AWS,VPC-->Security group-->select and Delete 
+In AWS,IAM-->Users-->select user created and Delete 
+
+
+169. AWS Configuration Cheat sheet
+This lecture note is not intended to be a replacement for the videos, but only to serve as a cheat sheet for students who want to quickly run thru the AWS configuration steps or easily see if they missed a step. Steps listed are accurate as of 7-11-2019, keep in mind that AWS makes frequent small changes to their UI.
+
+RDS Database Creation
+
+Go to AWS Management Console and use Find Services to search for RDS
+
+Click Create database button
+
+Select PostgreSQL
+
+Check 'only enable options eligible for RDS Free Usage Tier' and click Next button
+
+Scroll down to Settings Form
+
+Set DB Instance identifier to multi-docker-postgres
+
+Set Master Username to postgres
+
+Set Master Password to postgres and confirm
+
+Click Next button
+
+Make sure VPC is set to Default VPC
+
+Scroll down to Database Options
+
+Set Database Name to fibvalues
+
+Scroll down and click Create Database button
+
+ElastiCache Redis Creation
+
+Go to AWS Management Console and use Find Services to search for ElastiCache
+
+Click Redis in sidebar
+
+Click the Create button
+
+Make sure Redis is set as Cluster Engine
+
+In Redis Settings form, set Name to multi-docker-redis
+
+Change Node type to 'cache.t2.micro'
+
+Change Number of replicas to 0
+
+Scroll down to Advanced Redis Settings
+
+Subnet Group should say “Create New"
+
+Set Name to redis-group
+
+VPC should be set to default VPC
+
+Tick all subnet’s boxes
+
+Scroll down and click Create button
+
+Creating a Custom Security Group
+
+Go to AWS Management Console and use Find Services to search for VPC
+
+Click Security Groups in sidebar
+
+Click Create Security Group button
+
+Set Security group name to multi-docker
+
+Set Description to multi-docker
+
+Set VPC to default VPC
+
+Click Create Button
+
+Click Close
+
+Manually tick the empty field in the Name column of the new security group and type multi-docker, then click the checkmark icon.
+
+Scroll down and click Inbound Rules
+
+Click Edit Rules button
+
+Click Add Rule
+
+Set Port Range to 5432-6379
+
+Click in box next to Custom and start typing 'sg' into the box. Select the Security Group you just created, it should look similar to 'sg-…. | multi-docker’
+
+Click Save Rules button
+
+Click Close
+
+Applying Security Groups to ElastiCache
+
+Go to AWS Management Console and use Find Services to search for ElastiCache
+
+Click Redis in Sidebar
+
+Check box next to Redis cluster and click Modify
+
+Change VPC Security group to the multi-docker group and click Save
+
+Click Modify
+
+Applying Security Groups to RDS
+
+Go to AWS Management Console and use Find Services to search for RDS
+
+Click Databases in Sidebar and check box next to your instance
+
+Click Modify button
+
+Scroll down to Network and Security change Security group to multi-docker
+
+Scroll down and click Continue button
+
+Click Modify DB instance button
+
+Applying Security Groups to Elastic Beanstalk
+
+Go to AWS Management Console and use Find Services to search for Elastic Beanstalk
+
+Click the multi-docker application tile
+
+Click Configuration link in Sidebar
+
+Click Modify in Instances card
+
+Scroll down to EC2 Security Groups and tick box next to multi-docker
+
+Click Apply and Click Confirm
+
+Setting Environment Variables
+
+Go to AWS Management Console and use Find Services to search for Elastic Beanstalk
+
+Click the multi-docker application tile
+
+Click Configuration link in Sidebar
+
+Select Modify in the Software tile
+
+Scroll down to Environment properties
+
+In another tab Open up ElastiCache, click Redis and check the box next to your cluster. Find the Primary Endpoint and copy that value but omit the :6379
+
+Set REDIS_HOST key to the primary endpoint listed above, remember to omit :6379
+
+Set REDIS_PORT to 6379
+
+Set PGUSER to postgres
+
+Set PGPASSWORD to postgrespassword
+
+In another tab, open up RDS dashboard, click databases in sidebar, click your instance and scroll to Connectivity and Security. Copy the endpoint.
+
+Set the PGHOST key to the endpoint value listed above.
+
+Set PGDATABASE to fibvalues
+
+Set PGPORT to 5432
+
+Click Apply button
+
+IAM Keys for Deployment
+
+Go to AWS Management Console and use Find Services to search for IAM
+
+Click Users link in the Sidebar
+
+Click Add User button
+
+Set User name to multi-docker-deployer
+
+Set Access-type to Programmatic Access
+
+Click Next:Permissions button
+
+Select Attach existing polices directly button
+
+Search for 'beanstalk' and check all boxes
+
+Click Next:Review
+
+Add tag if you want and Click Next:Review
+
+Click Create User
+
+Copy Access key ID and secret access key for use later
+
+AWS Keys in Travis
+
+Open up Travis dashboard and find your multi-docker app
+
+Click More Options, and select Settings
+
+Scroll to Environment Variables
+
+Add AWS_ACCESS_KEY and set to your AWS access key
+
+Add AWS_SECRET_KEY and set to your AWS secret key
+
+
+
+Section 12: Onwards to Kubernetes!
+170. The Why's and What's of Kubernetes-----refer word doc
+
+171. Kubernetes in Development and Production ----- refer word doc
+
+172. New Minikube Install Instructions
+In the upcoming lecture Stephen will setup and install Minikube using Homebrew. The installation instructions have changed slightly.
+
+Instead of running, brew cask install minikube
+
+We only need to run, brew install minikube
+
+173. Minikube Setup on MacOS --refer word doc and below part
+In terminal complex dir,
+#which brew
+/usr/local/bin/brew --- if not installed then download from brew.sh, google it
+#brew install kubectl
+#which kubectl
+
+Google virtualbox.org--->LHS Downloads-->OS X hosts, click on it and installing will start.
+In Downloads folder, open virtual box.exe and install.
+#brew cask install minikube
+#which minikube
+#minikube start
+
+174. Minikube Setup on Windows Pro/Enterprise
+These instructions are for setting up and installing Minikube and its dependencies for use on Windows Pro or Enterprise with Docker Desktop and HyperV
+
+Install Kubectl
+1. Create a new directory that you will move your kubectl binaries into. A good place would be C:\bin
+
+2. Download the latest kubectl executable from the link on the Kubernetes doc page:
+
+https://kubernetes.io/docs/tasks/tools/install-kubectl/#install-kubectl-on-windows
+
+3. Move this downloaded .exe file into the bin directory you created.
+
+4. Use Windows search to type “env” then select “Edit the system environment variables”
+
+5. In the System Properties dialog box, click “Environment Variables”.
+
+6. In System Variables click on the “Path” Variable and then click “Edit”
+
+7. Click “New” and then type C:\bin
+
+8. Drag the newly created path so that it is higher in order than Docker's binaries. This is very important and will ensure that you will not have an out of date kubectl client.
+
+9. Click "OK"
+
+10. Restart your terminal and test by typing kubectl into it. You should get the basic commands and help menu printed back to your screen. If this doesn't work try restarting your machine.
+
+11. Run kubectl version to verify that you are using the newest version and not the out of date v1.10 version
+
+Install Minikube
+1. Download the Windows installer here:
+
+https://github.com/kubernetes/minikube/releases/latest/download/minikube-installer.exe
+
+2. Double click the .exe file that was downloaded and run the installer. All default selections are appropriate.
+
+3. Open up your terminal and test the installation by typing minikube. You should get the basic commands and help menu printed back to your screen. If this doesn't work try restarting your machine.
+
+Configure HyperV
+1. In Windows Search type "HyperV" and select "HyperV Manager"
+
+2. In the right sidebar click "Virtual Switch Manager"
+
+3. Leave selected "New Virtual network Switch" and "External" and click "Create Virtual Switch"
+
+4. Name the switch "Minikube Switch" (or whatever you would like to name it)
+
+5. Click Apply and acknowledge the "Pending changes" dialog box by clicking "yes"
+
+6. Once the switch has been created, click "Ok"
+
+Starting Up Minikube
+Since by default Minikube expects VirtualBox to be used, we need to tell it to use the hyperv driver instead, as well as the Virtual Switch we created earlier.
+
+Start up a terminal as an Administrator. Then, in your terminal run:
+
+minikube start --vm-driver hyperv --hyperv-virtual-switch "Minikube Switch"
+
+Important note, all minikube commands must be run in the context of an elevated Administrator.
+
+
+175. Minikube Setup on Windows Home
+These instructions are for setting up and installing Minikube and its dependencies for use on Windows Home editions that are using Docker Toolbox.
+
+Install Kubectl
+1. Create a new directory that you will move your kubectl binaries into. A good place would be C:\Users\YOURUSERNAME\bin since these path variables will also be made available to the "Docker Quick Start" terminal.
+
+2. Download the latest kubectl executable from the link on the Kubernetes doc page:
+
+https://kubernetes.io/docs/tasks/tools/install-kubectl/#install-kubectl-on-windows
+
+3. Move this downloaded .exe file into the bin directory you created.
+
+4. Use Windows search to type “env” or “edit” then select “Edit the system environment variables”
+
+5. In the System Properties dialog box, click “Environment Variables”.
+
+6. In User Variables click on the “Path” Variable and then click “Edit”
+
+7. Click “New” and then type C:\Users\YOURUSERNAME\bin
+
+8. Click "OK"
+
+9. Restart your terminal and test by typing kubectl into it. You should get the basic commands and help menu printed back to your screen. If this doesn't work try restarting your machine.
+
+Install Minikube
+VirtualBox should already be installed from setting up Docker Toolbox, so we wont need to install this again.
+
+To install Minikube we can use the standalone installer, which is available by clicking this link:
+
+https://github.com/kubernetes/minikube/releases/latest/download/minikube-installer.exe
+
+After the installer finishes, restart your terminal and test your installation:
+
+minikube status
+
+Running minikube start will provision the VirtualBox machines and startup your Kubernetes services.
+
+
+176. Minikube Setup on Linux
+These instructions should be valid for Debian / Ubuntu / Mint Linux distributions. Your experience may vary if using an RHEL / Arch / Other distribution or non desktop distro like Ubuntu server, or lightweight distros which may omit many expected tools.
+
+Install VirtualBox:
+Find your Linux distribution and download the .deb package, using a graphical installer here should be sufficient. If you use a package manager like apt to install from your terminal, you will likely get a fairly out of date version.
+
+https://www.virtualbox.org/wiki/Linux_Downloads
+
+After installing, check your installation to make sure it worked:
+
+VBoxManage —version
+
+As an alternative you can use (or maybe you have to use) KVM instead of VirtualBox. Here are some great instructions that can be found in this post (Thanks to Nick L. for sharing):
+
+https://computingforgeeks.com/install-kvm-centos-rhel-ubuntu-debian-sles-arch/
+
+
+Install Kubectl
+In your terminal run the following:
+
+curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+
+chmod +x ./kubectl
+
+sudo mv ./kubectl /usr/local/bin/kubectl
+
+
+Check your Installation:
+
+kubectl version
+
+See also official docs:
+https://kubernetes.io/docs/tasks/tools/install-kubectl/#install-kubectl-on-linux
+
+Install Minikube
+In your terminal run the following:
+
+curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64 && chmod +x minikube
+
+sudo install minikube /usr/local/bin
+
+Check your installation:
+
+minikube version
+
+Start Minikube:
+
+minikube start
+
+See also official docs:
+
+https://kubernetes.io/docs/tasks/tools/install-minikube/
+
+177. Docker Desktop's Kubernetes instead of Minikube
+These instructions are for using Docker Desktop's built-in Kubernetes instead of minikube which is discussed in the lectures.
+
+Windows Pro / Enterprise
+1. Right click the Docker icon in the Windows Toolbar
+
+2. Click Settings
+
+3. Click "Kubernetes" in the dialog box sidebar (If you don't see Kubernetes listed in the sidebar you may have Windows Containers enabled instead of Linux Containers - you can toggle this setting by right clicking the Docker toolbar icon and clicking "Switch to Linux Containers")
+
+4. Check the “Enable Kubernetes” box
+
+5. Click "Apply"
+
+6. Click Install to allow the cluster installation (This may take a while). If on Windows, you may get a dialog box warning from Windows Defender about Docker's vpnkit. Check the boxes to allow it to communicate on your network and click "Allow Access"
+
+macOS
+1. Click the Docker icon in the top macOS toolbar
+
+2. Click Preferences
+
+3. Click "Kubernetes" in the dialog box menu
+
+4. Check the “Enable Kubernetes” box
+
+5. Click "Apply"
+
+6. Click Install to allow the cluster installation (This may take a while).
+
+Usage
+Going forward, any minikube commands run in the lecture videos can be ignored. Also, instead of the IP address used in the video lectures when using minikube, we use localhost.
+
+For example, in the first project where we deploy our simple React app, using minikube we would visit:
+
+192.168.99.101:31515
+
+Instead, when using Docker Desktop's Kubernetes, we would visit: localhost:31515
+
+Also, you can skim through the discussion about needing to use the local Docker node in the "Multiple Docker Installations" and "Why Mess with Docker in the Node" lectures (187-189), this only applies to minikube users.
+
+
+178. Mapping Existing Knowledge ----- refer word doc also
+#minikube status
+#kubectl cluster-info
+Goal is to get the culti-client image running on our local Kubernetes Cluster running as a container.
+
+179. Adding Configuration Files
+In terminal root dir,
+#ls
+#mkdir simplek8s
+#cd simplek8s
+#code .
+
+Create client-pod.yaml file in simplek8s dir,
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client-pod
+  labels:
+    component:web
+spec:
+  containers:
+    - name: client
+      image: dockeruserid/mutli-client
+      ports:
+       - containerPort: 3000
+
+Create client-node-port.yaml in simplek8s dir,
+apiVersion: v1
+kind: Service
+metadata:
+  name: client-node-port
+spec:
+  type: NodePort
+  ports:
+   - ports: 3050
+     targetPort: 3000
+     nodePort: 31515
+  selector:
+   component: web
+
+180. Object Types and API Versions --- refer word doc
+
+181. Running Containers in Pods --- refer word doc
+Pods----grouping of containers
+
+182. Service Config Files in Depth -- refer word doc
+
+183. Connecting to Running Containers
+In terminal simplek8s dir,
+#ls
+#kubectl apply -f client-pod.yaml
+#kubectl apply -f client-node-port.yaml
+#kubectl get pods ------ you will get client-pod running
+#kubectl get services ------ all services created----you will get client-node-port and kubernetes by default
+In browser, localhost is not supported.
+#minikube ip
+ip:31515-----Fib calculator app
+
+184. The Entire Deployment Flow ----- refer word doc also
+In terminal simplek8s dir,
+#kubectl get pods
+#docker ps ---------- 1 container is running in client-pod i.e. multi-client
+#docker kill containerid_of_multi-client
+#docker ps ----- still you will get multi-client image with new container id as it has been restarted.
+Check via #kubectl get pods ---- still running and restarted once.
+
+185. Imperative vs Declarative Deployments ----- refer word doc
+
+Section 13: Maintaining Sets of Containers with Deployments
+186. Updating Existing Objects  ------ refer word doc
+187. Declarative Updates in Action ----- refer word doc also
+Here we are building new image.
+In simplek8s dir, make changes in client-pod.yaml
+containers image: dockeruserid/multi-worker
+
+In terminal simplek8s dir,
+#ls
+#kubectl apply -f client-pod.yaml
+#kubectl get pods
+To check which image is running in client-pod now,
+#kubectl describe pod client-pod
+
+188. Limitations in Config Updates
+In simplek8s dir, some changes done in client-pod.yaml
+ports: changed from 3000 to 9999 and after applying, it says some fields are not allowed to modify.
+#kubectl apply -f client-pod.yaml
+
+189. Running Containers with Deployments ---- refer word doc
+
+190. Deployment Configuration Files
+In simplek8s dir, create client-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client-deployment
+spec:
+  replicas:
+  selector:
+    matchLabels:
+      component:web
+    spec:
+     containers:
+       - name: client
+         image: dockeruserid/multi-client
+         ports:
+           - containerPort: 3000
+
+191. Walking Through the Deployment Config----refer word doc
+
+192. Applying a Deployment
+In terminal simplek8s dir,
+#kubectl get pods
+#kubectl delete -f client-pod.yaml
+#kubectl get pods
+#kubectl apply -f client-deployment.yaml
+#kubectl get pods
+#kubectl get deployments
+
+193. Why Use Services?
+In terminal simplek8s dir,
+#minikube ip
+In browser, ip:31515----- see the react app
+
+#kubectl get pods -o wide ----IP address assigned to this pod in the node.
+
+194. Scaling and Changing Deployments
+In simplek8s dir, change port 3000 to 9999 in client-deployment.yaml file
+In terminal simplek8s dir,
+#kubectl apply -f client-deployment.yaml
+#kubectl get deployments
+#kubectl get pods
+#kubectl describe pods
+
+Make other changes like replica:5, image:multi-worker in client-deployment.yaml file and apply
+in terminal and get pods/deployments.
+Check desired, current, up-to-date,available containers
+
+195. Updating Deployment Images
+Again make changes in client-deployment.yaml file
+replicas:1, image:multi-client, ports:3000
+In terminal simplek8s dir,
+#kubectl apply -f client-deployment.yaml
+#kubectl get deployments
+#kubectl get pods
+#minikube ip
+
+In browser, ip:31515 ---- react app
+
+196. Rebuilding the client Image
+We will rebuild multi-client image.
+Go to Complex dir in terminal,
+#cd client
+#code .
+In client-->src-->App.js--><h1> Fib Calculator version 2</h1> ---save the file
+
+In client dir,
+#docker build -t dockeruserid/multi-client .
+#docker push dockeruserid/multi-client ---Dockerhub will have new multi-client image now
+
+197. Trigerring Deployment Updates --- refer word doc also
+In github issue:33664 has multiple solutions for this topic
+
+198. Imperatively Updating a Deployment's Image
+In terminal complex dir-->client
+#ls
+#docker build -t dockeruserid/multi-client:v5 .
+#docker push dockeruserid/multi-client:v5
+
+In terminal simplek8s dir,
+#kubectl set image deployment/client-deployment client=dockeruserid/multi-client:v5
+image updated
+#kubectl get pods
+#minikube ip
+In browser, ip:31515 --- react app with Fib Calculator version 2
+
+199. Multiple Docker Installations ---- refer word doc
+In terminal simplek8s dir, 
+#docker ps ----- list the containers
+
+200. Reconfiguring Docker CLI
+In terminal simplek8s dir,
+#eval $(minikube docker-env) ---- to reconfigure docker container with new env variables
+
+201. Why Mess with Docker in the Node? ---- refer word doc also
+In terminal simplek8s dir,
+#docker ps ----- get containerid for multi-client
+#docker logs containerid
+#docker exec -it containerid sh
+#ls
+#exit
+#kubectl get pods
+#kubectl logs pod_name
+#kubectl exec -it pod_name sh
+#ls
+#exit
+#docker system prune -a ------ removes all containers
+
+Section 14: A Multi-container App with Kubernetes
+202. The Path to Production ---- refer word doc
+
+203. Checkpoint Files
+Attached to this section is a ZIP file with the current state of my 'complex' multi-container project.  If you made any changes to your copy of the multi-container project, or if you didn't get it working, then download this zip file and use my copy. 
+
+Its extremely important that your project files are identical to mine at this point - if anything is different then a lot of the Kubernetes stuff is going to appear to just not "work" for some mysterious reason.
+
+Resources for this lecture
+complex.zip
+
+204. A Quick Checkpoint
+In terminal complex dir,
+#ls
+#docker ps
+#docker-compose up --build
+#docker-compose up ------ since 1st time it will crash, do it 2nd time
+
+In complex dir-->docker-compose.yml file ---- check ports
+In browser-localhost:3050 ------ react app of fib calculator
+
+205. Recreating the Deployment --- Back up complex folder before doing the below 
+In terminal root dir-->complex-->#code .
+Delete travis.yml, docker-compose.yml, Dockerrun.aws.json files and nginx folder from complex dir.
+
+Create k8s folder in complex dir and create client-deployment.yaml in k8s folder,
+
+kpiVersion: apps/v1
+Kind: Deployment
+metadata:
+  name: client-deployment
+spec: 
+  replicas: 3
+  selector:
+    matchLabels:
+      component: web
+  template:
+    metadata:
+      label:
+         component: web
+    spec:
+      containers:
+       - name: client
+         image: dockeruserid/multi-client
+         ports:
+           - containerPort: 3000
+
+
+206. NodePort vs ClusterIP Services ---- refer word doc
+
+207. The ClusterIP Config 
+Create client-cluster-ip-service.yaml file in k8s dir,
+
+apiVersion: v1
+kind: Service
+metadata: 
+  name: client-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: web
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+208. Applying Multiple Files with Kubectl
+In terminal complex dir, To delete old deployments,
+#kubectl get deployments
+#kubectl delete deployment client-deployment
+#kubectl get services
+#kubectl delete service client-node-port\ ----- to delete service which was accessed for cleint-deployment
+
+#kubectl apply -f k8s/client-deployment.yaml
+#ls
+#kubectl apply -f k8s
+#kubectl get deployments
+#kubectl get pods
+#kubectl get services
+
+209. Express API Deployment Config
+Create server-deployment.yaml file in k8s dir,
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      component: server
+  template:
+    metadata:
+      labels:
+        component: server
+    spec:
+      containers:
+        - name: server
+          image: dockeruserid/multi-server
+          ports:
+            - containerPort: 5000
+
+210. Cluster IP for the Express API
+Create server-cluster-ip-service.yaml file in k8s dir,
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: server
+  ports:
+    - port: 5000
+      targetPort: 5000
+
+211. Combining Config into Single Files
+Create server-config.yaml file in k8s dir,------ this file has been deleted as we have made separate files, this was only to show configuration in single file
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      component: server
+  template:
+    metadata:
+      labes:
+        component: server
+    spec:
+      containers:
+        - name: server
+          image: dockeruserid/multi-server
+          ports:
+            - containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: server
+  ports:
+    - port: 5000
+      targetPort: 5000
+
+212. The Worker Deployment
+Create worker-deployment.yaml file in k8s dir,
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: worker
+  template:
+    metadata:
+      labels:
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: dockeruserid/multi-worker
+       
+213. Reapplying a Batch of Config Files
+In terminal complex dir,
+#ls
+#ls k8
+#kubectl apply -f k8s --- all config files considered in k8s folder
+#kubectl get pods
+#kubectl get deployments
+#kubectl get services
+#kubectl logs pod_name
+
+214. Creating and Applying Redis
+Create redis-deployment.yaml file in k8s dir,
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: redis
+  template:
+    metadata:
+      labels:
+        component: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis
+          ports:
+           - containerPort: 6379
+
+Create redis-cluster-ip-service.yaml file in k8s dir,
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+
+In terminal complex dir,
+#ls
+#kubectl apply -f k8s
+#kubectl get pods
+#kubectl get services
+
+215. Last Set of Boring Config
+Create postgres-deployment.yaml file in k8s dir,
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: postgres
+  template:
+    metadata:
+      labels:
+        component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres
+          ports:
+           - containerPort: 5432 ---- default port for postgres
+
+Create postgres-cluster-ip-service.yaml file in k8s dir,
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-cluster-ip-service
+spec:
+  type: ClusterIP
+  selector:
+    component: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+In terminal complex dir,
+#ls
+#kubectl apply -f k8s
+#kubectl get pods
+
+216. The Need for Volumes with Databases ----- refer word doc
+
+217. Kubernetes Volumes ----- refer word doc
+
+218. Volumes VS Persistent Volumes ----- refer word doc
+Normal Volumes refer to data stored in the pod and once pod crashes, all data tied to it will be gone.
+Persistent Volumes refers to data stored outside the pod and is persistently stored so if pod crashes also then too another pod will be created and it will be tied to the data stored outside pod.
+
+219. Persistent Volumes Vs Persistent Volumes Claim ---refer word doc
+
+220. Claim Config Files
+Create database-persistent-volume-claim.yaml in k8s dir
+
+apiVersion: v1
+kind: PersisteVolumeClaim
+metadata: 
+  name: database-persistent-volume-claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+
+221. Persistent Volume Access Modes ---- refer word doc
+
+222. Where Does Kubernetes Allocate Persistent Volumes? ---- refer word doc
+#kubectl get storageclass ---- standard is default
+#kubectl describe storageclass
+
+223. Designating a PVC in a Pod Template
+Some changes in postgres-deployment.yaml file in k8s dir,
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: postgres
+  template:
+    metadata:
+      labels:
+        component: postgres
+    spec:
+      volumes:
+        - name: postgres-storage
+          persistentVolumeClaim:
+            claimName: database-persistent-volume-claim
+      containers:
+        - name: postgres
+          image: postgres
+          ports:
+           - containerPort: 5432
+          volumeMounts:
+           - name: postgres-storage
+             mountPath: /var/lib/postgresql/data
+             subPath: postgres
+
+224. Fix for Postgres CrashLoopBackOff Error on Windows Pro
+This note is only for students that are on Windows Pro and are using Docker Desktop's built-in Kubernetes. If you are using Docker for Mac's Kubernetes or Minikube this issue will not apply to you and can be skipped.
+
+In the next lecture, we will be running a kubectl apply -f k8s after creating our PersistentVolumeClaim. You will likely notice that your Postgres pod will show a status of CrashLoopBack.
+
+To resolve this we need to create a PersistentVolume in addition to the PersistentVolumeClaim.
+
+You can refer to the official Kubernetes docs here:
+
+https://kubernetes.io/docs/tasks/configure-pod-container/configure-persistent-volume-storage/
+
+1. Create a database-persistent-volume.yaml and enter the following:
+
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: database-persistent-volume
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/mnt"
+The docs specify that you should SSH into the node and create a data directory under /mnt but we could similarly just specify /mnt or as another student mentioned /tmp as the hostPath
+
+2. Create the database-persistent-volume-claim.yaml file:
+
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: database-persistent-volume-claim
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+This is pretty similar to what is used in the course,  except that we are adding 'storageClassName' which binds PersistentVolumeClaim requests to the PersistentVolume.
+
+3. Run kubectl apply -f k8s
+
+4. Run kubectl get pods and the postgres pod should show a status of Running
+
+
+225. Applying a PVC
+In complex dir,
+#ls
+#kubectl apply -f k8s
+#kubectl get pv
+#kubectl get pvc
+
+226. Defining Environment Variables --- refer word doc
+
+227. Adding Environment Variables to Config
+adding env variable in worker-deployment.yaml file in k8s dir,
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: worker
+  template:
+    metadata:
+      labels:
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: dockeruserid/multi-worker
+          env:
+            - name: REDIS_HOST
+              value: redis-cluster-ip-service
+            - name: REDIS_PORT
+              value: 6379
+
+adding env variables in server-deployment.yaml file in k8s dir,
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      component: server
+  template:
+    metadata:
+      labels:
+        component: server
+    spec:
+      containers:
+        - name: server
+          image: dockeruserid/multi-server
+          ports:
+            - containerPort: 5000
+          env:
+            - name: REDIS_HOST
+              value: redis-cluster-ip-service
+            - name: REDIS_PORT
+              value: 6379
+            - name: PGUSER
+              value: postgres
+            - name: PGHOST
+              value: postgres-cluster-ip-service
+            - name: PGPORT
+              value: 5432
+            - name: PGDATABASE
+              value: postgres
+
+
+228. Creating an Encoded Secret ---refer word doc
+In terminal complex dir,
+#kubectl create secret generic pgpassword --from-literal PGPASSWORD=12345asdf
+#kubectl get secrets
+
+229. Passing Secrets as Environment Variables
+Add pgpassword at last in server-deployment.yaml file in k8s dir,
+
+   - name: PGPASSWORD
+     valueFrom:
+       secretKeyRef:
+         name: pgpassword
+         key: PGPASSWORD
+
+Add env in postgres-deployment.yaml file in k8s dir,
+add at Last under containers:
+  env:
+    - name:PGPASSWORD 
+      valueFrom:
+        secretKeyRef:
+          name: pgpassword
+          key: PGPASSWORD
+
+In terminal complex dir,
+#kubectl apply -f k8s ----- error msg as cannot convert int64 to string
+
+230. Environment Variables as Strings
+In server-deployment.yaml and worker-deployment.yaml file, port values are given as integer, to avoid the above error we will put port values into single quote' ' and save the files.
+
+In terminal complex dir,
+#kubectl apply -f k8s
+
+
+Section 15: Handling Traffic with Ingress Controllers
+231. Load Balancer Services ---- refer word doc
+
+232. A Quick Note on Ingresses ----- refer word doc
+
+233. One Other Quick Note! ----- refer word doc
+
+234. Behind the Scenes of Ingress ---- refer word doc
+
+235. More Behind the Scenes of Ingress ---- refer word doc
+
+236. Optional Reading on Ingress Nginx
+Just in case you wanted to understand ingress-nginx a bit better, check out this article by Hongli Lai - https://www.joyfulbikeshedding.com/blog/2018-03-26-studying-the-kubernetes-ingress-system.html.  Hongli is an absolute genius, he co-created Phusion Passenger, an extremely popular webserver that integrates with Nginx.
+
+237. Setting up Ingress Locally with Minikube
+Browse github.com/kubernetes/ingress-nginx----Click on same link and in home page, click on Deployment tab for Installation guide
+
+-Generic Deployment
+execute mandatory command in terminal, first copy the link and paste in another browser tab-config file will open and you can check the config details.
+
+Now in terminal complex dir, paste the copied cmd and execute
+#kubectl apply -f https://
+Then copy cmd of minikube for standard usage
+#minikube addons enable ingress
+
+238. Setting up Ingress with Docker Desktop's Kubernetes
+This note is only for students that are using Docker Desktop's built-in Kubernetes. If you are using Minikube, this section does not apply to and can be skipped.
+
+In the previous lecture we learned how to setup and enable Ingress for Minikube. If you are using Docker Desktop's Kubernetes, the second step to enable the service is a little different.
+
+1. Make sure you executed the mandatory generic script that was discussed in the lecture:
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/mandatory.yaml
+ 
+2. Execute the provider specific script to enable the service:
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/master/deploy/static/provider/cloud-generic.yaml
+ 
+The official docs are not very clear about this but the script applies to both Windows and Mac versions of Docker Desktop, even though it only lists Docker for Mac. If you have missed this step, then your Ingress will not work!
+
+3. Verify the service was enabled by running the following:
+
+kubectl get svc -n ingress-nginx
+
+239. Creating the Ingress Configuration
+Create ingress-service.yaml file in k8s dir,
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ingress-service
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: / ---- how will nginx behaves
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            backend:
+              serviceName: client-cluster-ip-service
+              servicePort: 3000
+          - path: /api/
+            backend:
+              serviceName: server-cluster-ip-service
+              servicePort: 5000
+
+In terminal complex dir,
+#ls
+#kubectl apply -f k8s ---- ingress-service created
+
+240. Fix for ingress-service.yaml Configuration
+In the previous lecture we created our ingress-service.yaml configuration file. There has recently been an update to how we need to specify some of these rules.
+
+Three lines need to be changed - the annotation of rewrite-target and the two path identifiers:
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ingress-service
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    # UPDATE THIS LINE ABOVE
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /?(.*)
+          # UPDATE THIS LINE ABOVE
+            backend:
+              serviceName: client-cluster-ip-service
+              servicePort: 3000
+          - path: /api/?(.*)
+          # UPDATE THIS LINE ABOVE
+            backend:
+              serviceName: server-cluster-ip-service
+              servicePort: 5000
+
+241. Testing Ingress Locally
+In terminal complex dir,
+#minikube ip
+In browser, https://ip ----- fib calculator app
+
+242. The Minikube Dashboard
+In terminal complex dir, 
+#minikube dashboard ---- will open kubernetes dashboard in browser 
+visit every option and check yourself
+
+243. Docker Desktop's Kubernetes Dashboard
+This note is for students using Docker Desktop's built-in Kubernetes. If you are using Minikube, the setup here does not apply to you and can be skipped.
+
+If you are using Docker Desktop's built-in Kubernetes, setting up the admin dashboard is going to take a little more work.
+
+1. Grab the kubectl script we need to apply from the GitHub repository: https://github.com/kubernetes/dashboard
+
+2. We will need to download the config file locally so we can edit it (make sure you are copying the most current version from the repo).
+
+If on Mac or using GitBash on Windows enter the following:
+
+curl -O https://raw.githubusercontent.com/kubernetes/dashboard/v1.10.1/src/deploy/recommended/kubernetes-dashboard.yaml
+
+If using PowerShell:
+
+Invoke-RestMethod -Uri https://raw.githubusercontent.com/kubernetes/dashboard/v1.10.1/src/deploy/recommended/kubernetes-dashboard.yaml -Outfile kubernetes-dashboard.yaml
+
+3. Open up the downloaded file in your code editor and find line 116. Add the following two lines underneath --auto-generate-certificates:
+
+args:
+  - --auto-generate-certificates
+  - --enable-skip-login
+  - --disable-settings-authorizer
+4. Run the following command inside the directory where you downloaded the dashboard yaml file a few steps ago:
+
+kubectl apply -f kubernetes-dashboard.yaml
+
+5. Start the server by running the following command:
+
+kubectl proxy
+
+6. You can now access the dashboard by visiting:
+
+http://localhost:8001/api/v1/namespaces/kube-system/services/https:kubernetes-dashboard:/proxy/
+
+7. You will be presented with a login screen:
+
+
+8. Click the "SKIP" link next to the SIGN IN button.
+
+9. You should now be redirected to the Kubernetes Dashboard:
+
+
+Important! The only reason we are bypassing RBAC Authorization to access the Kubernetes Dashboard is because we are running our cluster locally. You would never do this on a public facing server like Digital Ocean and would need to refer to the official docs to get the dashboard setup:
+https://github.com/kubernetes/dashboard/wiki/Access-control
+
+===========================================================================
+
+Section 16: Kubernetes Production Deployment
+244. The Deployment Process ----- refer word doc
+Here if we are using google cloud then we have to pay some amount, to check the price details browse google cloud cost calculator --- $42 per month
+
+245. Google Cloud Vs AWS for Kubernetes ---- refer word doc
+We can run same commands in google cloud as below
+#kubectl get pods
+
+246. Creating a Git Repo
+Go to github.com-->create a new repo-->multi-k8s-->public and create repository
+copy the git link
+
+In terminal complex dir,
+#ls -a ------ check .git is available or not
+if not then, #git init ---- initialize git repo
+if yes then, #git remote -v
+#git remote remove origin ------- removing the old git initialization
+After removing, add in the new git init,
+#git remote add origin link.......
+#git remote -v
+#git push origin master
+
+Check in github, all files pushed are available
+
+
+247. Linking the Github Repo to Travis
+Go to travis-ci.org--->LHS Sync Account--->Search multi-k8s in legacyservices Integration and once found enable it to build
+
+
+248. Free Google Cloud Credits
+In the next section we are going to start creating our project on Google Cloud.
+
+Remember, creating Kubernetes clusters on Google Cloud costs real money!  If you are sensitive to spending money, you can try getting some free Google Cloud credits using this link: https://console.cloud.google.com/freetrial/signup/0.  Note that if you already have a Google Cloud account you will have to sign out of it and create a new account in order to get those free credits.
+
+249. Creating a Google Cloud Project
+Google Cloud Console --- console.cloud.google.com
+Create New Project-->multi-k8s
+
+250. Linking a Billing Account
+In google cloud dashboard, click on dropdown dartdev-->search multi-k8s-->then go to LHS navigation menu-->Billing-->Link a Billing Account-->Fill payment details and then Set Account-->Project linked to billing account
+
+251. Kubernetes Engine Init
+need to create Kubernetes cluster, for this go to LHS, scroll down in compute section-->Kubernetes Engine-->Enable billing or refresh page
+
+252. Creating a Cluster with Google Cloud
+In google cloud, create cluster in Kubernetes Engine
+
+Name: multi-cluster
+Location Type: Zonal, select zone or keep it by default
+Master version-default
+Node pools
+default-pool
+No. of nodes-3 is default, if want to change, can do the same.
+Machine Type-1vCPU with 3.75GB memory
+Advanced Edit --->Create instance and cluster will be created.
+
+
+253. Don't Forget to Cleanup!
+Remember, as long as this cluster is running you will be billed real life money!
+
+If you need to stop the course for any reason remember to shut down this cluster.  Directions for cleaning up the Google Cloud cluster can be found in a lecture at the very end of this course. Here's a direct link to it: https://www.udemy.com/docker-and-kubernetes-the-complete-guide/learn/v4/t/lecture/11684242?start=0
+
+
+254. Kubernetes Dashboard on Google Coud --- refer word doc
+Go through cluster, and other options of Workloads, Services, Configuration, Storage
+
+255. Travis Deployment Overview --- refer word doc
+
+256. Installing the Google Cloud SDK
+In complex dir, create .travis.yml file
+
+sudo: required
+services: 
+  - docker
+before_install:
+  -curl https://sdk.cloud.google.com | bash > /dev/null;
+  - source $HOME/google-cloud-sdk/path.bash.inc
+  - gcloud components update kubectl
+  - gcloud auth activate-service-account --key-file service-account.json
+
+257. Generating a Service Account
+Go to Google Cloud Dashboard-->LHS Navigation menu-->IAM & admin-->Service Accounts-->Create Service Account-->Service account Name: travis-deployer-->Project role:KubernetesEngine admin-->key type: json file-->Save
+
+
+258. Running Travis CLI in a Container---Here we will put josn file here
+In terminal complex dir,
+#docker run -it -v $(pwd):/app ruby:2.3 sh
+ #ls
+ #cd app
+ #ls
+ #gem install travis --no-rdoc --no-ri
+ #travis 
+
+
+259. Encrypting a Service Account File
+In terminal complex dir in above sh,
+#travis login
+Username and Password of github login as we have sign in with github credentials
+Copy json file from Downloads to complex dir and rename file as service-account.json
+Now check in terminal,
+sh
+#ls
+#travis encrypt-file service-account.json -r dockeruserid/name_of-repo(multi-k8s)
+Copy the cmd and paste in .travis.yml file in complex dir,
+
+before_install:
+  - openssl.....paste cmd
+
+#ls ---- you will get service-account.json.enc file which we have to add in git repository
+Delete the original service-account.json file in complex dir,
+#ls
+#exit
+
+In terminal complex dir,
+#ls
+#git add .
+#git commit -m "added encrypted service account file"
+
+
+260. More Google Cloud CLI Config
+Add in .travis.yml file in complex dir,
+
+-gcloud config set project (paste id of the project from google cloud)
+-gcloud config set compute/zone (paste location from google cloud cluster location)
+-gcloud container clusters get-credentials multi-cluster(multi-cluster is name of cluster)
+
+
+261. Fix For Failing Travis Builds
+In the upcoming lecture we will be adding a script to our .travis.yml file. Similar to our previous projects that ran tests using Travis, we need to make sure the tests exit after running and don't cause our builds to fail.
+
+Make sure to change this script:
+
+script:
+  - docker run USERNAME/docker-react npm run test -- --coverage
+To use the CI flag and remove coverage:
+
+script:
+  - docker run -e CI=true USERNAME/docker-react npm run test
+
+
+262. Running Tests with Travis
+Add in .travis.yml file in complex dir,
+
+ - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+Go to travis-ci.org -->multi-k8s project--->Environment Variables--> Add
+DOCKER_USERNAME: dockeruserid
+DOCKER_PASSWORD: password ------>Add
+
+Add in .travis.yml file in complex dir,
+
+ - docker build -t dockeruserid/react-test -f ./client/Dockerfile.dev ./client
+
+script:
+ - docker run dockeruserid/react-test npm test -- --coverage
+
+
+263. Custom Deployment Providers
+Add in .travis.yml file in complex dir,
+
+deploy:
+  provider: script
+  script: bash ./deploy.sh
+  on:
+    branch: master
+
+264. Unique Deployment Images
+Create deploy.sh in complex dir,
+
+docker build -t dockeruserid/multi-client -f ./client/Dockerfile ./client
+docker build -t dockeruserid/multi-server -f ./server/Dockerfile ./server
+docker build -t dockeruserid/multi-worker-f ./worker/Dockerfile ./worker
+docker push dockeruserid/multi-client
+docker push dockeruserid/multi-server
+docker push dockeruserid/multi-worker
+kubectl apply -f k8s
+kubectl set image deployments/server-deployment server=dockeruserid/multi-server
+
+
+265. Unique Tags for Built Images
+sha is a unique indentifying token,
+In terminal complex dir,
+#git rev-parse HEAD	
+#git log ---- sha is there for each commit
+
+266. Updating the Deployment Script
+Add env between services and before_install in .travis.yml file in complex dir,
+
+env:
+  global:
+    - SHA=$(git rev-parse HEAD)
+    - CLOUDSDK_CORE_DISABLE_PROMPTS=1
+
+Add tags to the build in deploy.sh file in complex dir,
+
+docker build -t dockeruserid/multi-client:latest -t dockeruserid/multi-client:$SHA -f ./client/Dockerfile ./client
+docker build -t dockeruserid/multi-server:latest -t dockeruserid/multi-server:$SHA -f ./server/Dockerfile ./server
+docker build -t dockeruserid/multi-worker:latest -t -t dockeruserid/multi-worker:$SHA -f ./worker/Dockerfile ./worker
+docker push dockeruserid/multi-client:latest
+docker push dockeruserid/multi-server:latest
+docker push dockeruserid/multi-worker:latest
+
+docker push dockeruserid/multi-client:$SHA
+docker push dockeruserid/multi-server:$SHA
+docker push dockeruserid/multi-worker:$SHA
+
+kubectl apply -f k8s
+kubectl set image deployments/server-deployment server=dockeruserid/multi-server:$SHA
+kubectl set image deployments/client-deployment client=dockeruserid/multi-client:$SHA
+kubectl set image deployments/worker-deployment worker=dockeruserid/multi-worker:$SHA
+
+
+267. Configuring the GCloud CLI on Cloud Console
+In Google Cloud Dashboard, click on RHS Activate Cloud Shell,
+In shell,
+$ gcloud config set project (projectid from google cloud)
+$ gcloud config set compute/zone (location of google cloud cluster)
+$ gcloud container clusters get-credentials multi-cluster(name of cluster)
+
+
+268. Creating a Secret on Google Cloud
+In Google Cloud Shell,
+$ kubectl get pods 
+$ kubectl create secret generic pgpassword --from-literal PGPASSWORD=mypgpassword123
+Check secret created in Configuration tab.
+
+
+269. Helm v3 Update
+This note is if you wish to use the latest version of Helm, which is now v3. This is a major update, as it removes the use of Tiller.
+
+1. Install Helm v3:
+
+curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 > get_helm.sh
+chmod 700 get_helm.sh
+./get_helm.sh
+2. Skip the commands run in the following lectures:
+
+Helm Setup, Kubernetes Security with RBAC, Assigning Tiller a Service Account and Ingress-Nginx with Helm. You should still watch these lectures and they contain otherwise useful info.
+
+3. Install Ingress-Nginx:
+
+helm repo add stable https://kubernetes-charts.storage.googleapis.com/
+helm install my-nginx stable/nginx-ingress --set rbac.create=true 
+
+
+270. Helm v2 Update
+This note is for students who wish to continue using v2 of Helm with Tiller and follow along with the next few lectures.
+
+In your Google Cloud console, instead of the install instructions provided in the Helm Setup lecture, run the following commands:
+
+curl -LO https://git.io/get_helm.sh
+chmod 700 get_helm.sh
+./get_helm.sh  
+
+
+271. Helm Setup
+Go to github.com/helm/helm---->Scroll down--->Install--->Open Quickstart Guide
+Installing Helm--->From Script
+Run 3 cmds in goggle console
+you can read GKE for more details
+
+
+272. Kubernetes Security with RBAC --------- refer word doc
+
+273. Assigning Tiller a Service Account
+In google cloud shell,
+$ kubectl create serviceaccount --namespace kube-system tiller
+$ kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller
+$ helm init --service-account tiller --upgrade
+
+With the helm installed, we can use it to install new services such as nginx ingress inside application
+
+
+274. Ingress-Nginx with Helm ----- refer nginx ingress document
+
+275. The Result of Ingress-Nginx
+Go through options in google cloud dashboard. ----- Workloads, services, etc
+Network services---->Load balancer details
+
+
+276. Finally-Deployment!
+In terminal complex dir,
+#git status
+#git add .
+#git commit -m "added deployment scripts"
+#git push origin master
+
+Go to travis-ci.org---->multi-k8s project --->Check the build
+
+277. Did I really type that?
+Build got failed as error not interactive login, fixed the spelling mistake of DOCKER PASSWORD in .travis.yml file.
+
+Again complete the git cmds and build is successful this time.
+
+
+278. Verifying Deployment
+See all deployments in Workloads of google cloud dashboard, services, Configuration, storage.........
+Check fib calculator application in browser, https://IP from services
+
+279. A Workflow for Changing in Prod
+In terminal complex dir,
+#git checkout -b devel
+
+In complex-->client dir-->src-->App.js 
+Change <h1> Fib Calculator Version Kubernetes </h1>
+
+In terminal complex dir and devel branch,
+#git status
+#git add .
+#git commit -m "updated header"
+#git push origin devel
+
+Check in github.com--->dockeruserid/multi-k8s
+you will see devel branch-->
+Pull requests tab-->New pull request-->compare devel with basic master-->Create pull request
+Updated header
+Change the header in App.js
+
+
+280. Merging a PR for Deployment
+In github.com---->Merge Pull request----->Merge
+Check in travis-ci.org also
+
+
+281. That's It! What Next?
+Check in brower ----https://IP (ip from services google cloud) ---- check new version Kubernetes
+
+==============================================================================
+
+Section 17: HTTPS Setup with Kubernetes
+282. HTTPS Setup Overview ---- refer word doc
+
+
+283. Domain Purchase
+Go to domains.google.com--->Search Domain--->and once domain is selected,you will get domain name at domains.google.com
+
+
+284. Domain Name Setup
+Now in Google Cloud Platform--->Services--->here for this ip, domain name which we have purchased will be set up.
+
+In domains.google.com--->k8s-multi.com domain--->Click on DNS-->Scroll down till Custom resource records
+
+Name:@-->Type:A-->1H--->IP Address-->Add
+Name:www-->Type:CNAME-->1H--->k8s-multi.com-->Add
+
+
+285. Fix for Cert Manager Breaking Changes
+In the upcoming lecture we will be installing the Cert Manager using Helm on Google Cloud. There have been some breaking changes introduced with v0.11.0 of Cert Manager, so we will need to do a few things differently.
+
+Cert Manager Installation
+The installations steps have changed, per the official docs here:
+
+https://docs.cert-manager.io/en/latest/getting-started/install/kubernetes.html#steps
+
+Instead of the installation instructions given at around 1:20 in the video, we will complete these steps by typing into our Cloud Shell:
+
+1. Apply the yaml config file
+
+kubectl apply --validate=false -f https://raw.githubusercontent.com/jetstack/cert-manager/release-0.11/deploy/manifests/00-crds.yaml
+
+2. Create the namespace for cert-manager
+
+kubectl create namespace cert-manager
+
+3. Add the Jetstack Helm repository
+
+helm repo add jetstack https://charts.jetstack.io
+
+4. Update your local Helm chart repository cache
+
+helm repo update
+
+5.  Install the cert-manager Helm chart:
+
+Helm v2:
+
+helm install \
+  --name cert-manager \
+  --namespace cert-manager \
+  --version v0.11.0 \
+  jetstack/cert-manager
+Helm v3:
+
+helm install \
+  cert-manager \
+  --namespace cert-manager \
+  --version v0.11.0 \
+  jetstack/cert-manager
+
+
+issuer.yaml file
+In the "Issuer Config File" lecture, the yaml file will need a few small changes per these docs:
+
+https://docs.cert-manager.io/en/latest/tasks/issuers/setup-acme/index.html#creating-a-basic-acme-issuer
+
+1. Make sure to update apiVersion as shown on line 1
+
+2. Add the solvers property
+
+apiVersion: cert-manager.io/v1alpha2
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: "youremail@email.com"
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+
+
+certificate.yaml file
+In the "Certificate Config File" lecture, only one minor change is required.
+
+1. The only change needed in this file is to update the apiVersion on line 1:
+
+apiVersion: cert-manager.io/v1alpha2
+
+
+
+ingress-service.yaml file
+In the "Ingress Config for HTTPS" lecture, we need to change one of the annotations.
+
+certmanager.k8s.io/cluster-issuer: 'letsencrypt-prod'
+change to:
+
+cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+
+286. Cert Manager Install
+Go to github.com/jetstack/cert-manager---->Scroll down till Documentation-->Click on link--->Getting Started--->Installing cert-manager--->Copy cmd and paste in Google Cloud Dashboard shell.
+
+
+287. How to Wire up Cert Manager ---- refer word doc
+
+288. Issuer Config File
+Create issuer.yaml file in k8s dir,
+
+apiVersion: certmanager.k8s.io/v1alpha1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: 'ste.grider@gmail.com'
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    http01: {}
+
+
+289.Certificate Config File
+Create certificate.yaml file in k8s dir,
+
+apiVersion: certmanager.k8s.io/v1alpha1
+kind: Certificate
+metadata:
+  name: k8s-multi-com-tls
+spec:
+  secretName: k8s-multi-com
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: k8s-multi.com
+  dnsNames:
+    - k8s-multi.com
+    - www.k8s-multi.com
+  acme:
+    config:
+      - http01:
+
+          ingressClass: nginx
+        domains:
+          - k8s-multi.com
+          - www. k8s-multi.com
+
+
+290. Deploying Changes
+
+In terminal complex dir(devel branch),
+#git checkout master
+#git status
+#git add .
+#git commit -m "added certificate and issuer"
+#git pull origin master
+#git push origin master
+
+Check in google cloud kubernetes dashboard--->Configuration-->Cluster created for certificate and issuer
+
+
+291. Verifying the Certificat
+In google cloud kubernetes dashboard--->Kubernetes shell--->
+$ kubectl get certificates
+$ kubectl describe certificates
+$ kubectl get secrets
+
+
+292. Ingress Config for HTTPS
+Changes in ingress-service.yaml file in k8s dir,
+under metadata-->annotations
+
+  certmanager.k8s.io/cluster-issuer: 'letsencrypt-prod'
+  nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+
+under spec:
+  tls:
+   - hosts:
+      - k8s-multi.com
+      - www.k8s-multi.com
+     secretName: k8s-multi.com 
+
+under rules:
+   - host: k8s-multi.com
+
+Copy complete host part and paste below for 
+   - host: www.k8s-multi.com
+
+
+Again in terminal complex dir,
+git add, commit and push
+
+
+293. It Worked!
+Check in browser--->https://k8s-multi.com and www.k8s-multi.com ---- fib calculator react app is working
+
+
+294. Google Cloud Cleanup
+Time for some cleanup! If you want to close down the Kubernetes cluster running on Google Cloud, do the following.  Remember, you are paying for the running cluster!
+
+Steps to clean up:
+
+1) Click the project selector on the top left of the page
+
+
+2) Click the 'gear' icon on the top right
+
+
+3) Find your project in the list of projects that is presented, then click the three dots on the far right hand side
+
+
+4) Click 'Delete'
+
+
+5) Enter your project ID and click 'Shut Down'
+
+
+
+295. Local Environment Cleanup
+You might want to also clean up some of the work you did on your local machine. Remember, we have a running Kubernetes cluster, and we have also built a ton of images.
+
+
+Stopping Minikube
+
+To stop Minikube, and the VM that it runs, run minikube stop .  You can bring your local cluster back online at any time by running minikube start
+
+
+Stopping Running Containers
+
+You might still have some containers running on your machine.  Try a docker ps .  You can then run docker stop <container_id> to clean up any running containers
+
+
+Clearing the Build Cache
+
+All the images that we built and ran during the course are cached on your local machine - they might be taking up to around 1GB of space.  You can clean these up by running docker system prune
+
+=============================================================================================
+
+Section 18: Local Development with Skaffold
+296. Akward Local Development ----- refer word doc
+
+
+297. Installing Skaffold
+Go to skaffold.dev/docs/getting-started
+In terminal complex dir,
+#brew install skaffold
+
+298. The Skaffold Config File
+ In terminal complex dir,
+#skaffold version
+
+Create skaffold.yaml file in root complex dir,
+In skaffold site, you will see options such as references, skaffold.yaml----refer this and create your own skaffold.yaml file
+
+apiVersion: skaffold/v1beta2
+kind: Config
+build:
+  local:
+    push: false
+  artifacts:
+    - image: dockeruserid/multi-client
+      context: client
+      docker:
+        dockerfile: Dockerfile.dev
+      sync:
+        '**/*.js': .
+        '**/*.css': .
+        '**/*.html': .
+
+299. Live Sync Changes
+Continue in skaffold.yaml file
+
+deploy:
+  kubectl:
+    manifests:
+      - k8s/client-deployment.yaml
+
+Save the file.
+
+In terminal complex dir,
+#skaffold dev
+
+Any changes done in app, with the help of skaffold app will be updated automatically.
+Eg:
+
+In complex-->client-->src--->App.js
+Fibonacci Calculator UPDATED
+
+Again check browser---https://k8s-multi.com
+
+
+300. Automatic Shutdown
+CTRL+C
+Pruning images....
+
+#kubectl get pods
+
+Add yaml files in skaffold.yaml file,
+
+ manifests:
+      - k8s/client-deployment.yaml
+      - k8s/server-deployment.yaml
+      - k8s/worker-deployment.yaml
+      - k8s/server-cluster-ip-service.yaml
+      - k8s/client-cluster-ip-service.yaml
+
+In terminal complex dir,
+#skaffold dev
+all these server, worker deployment deleted
+#kubectl get pods
+
+
+
+301. Testing Live Sync with the API Server
+In skaffold.yaml file,
+under artifacts:
+
+   - image: dockeruserid/multi-server
+     context: server
+     docker:
+       dockerfile: Dockerfile.dev
+     sync:
+       '**/*.js': .
+   - image: dockeruserid/multi-worker
+     context: worker
+     docker:
+       dockerfile: Dockerfile.dev
+     sync:
+       '**/*.js': .
+   - image: dockeruserid/multi-server
+     context: server
+     docker:
+       dockerfile: Dockerfile.dev
+     sync:
+       '**/*.js': .
+
+In terminal complex dir,
+#skaffold dev
+
+Check app is running properly
+Make some changes in index.js file like comment const values // and res.send(1,2,3)
+With this, skaffold will automatically start-restart nodemon
+
+
+302. Bonus!
+Interested in some of my other courses? Try one out now!
+
+Modern React with Redux - https://www.udemy.com/course/react-redux/?couponCode=32E0768C2CF871E78D4A
+
+Typescript: The Complete Developer's Guide - https://www.udemy.com/course/typescript-the-complete-developers-guide/?couponCode=45460899736F528F4547
+
+The Complete React Native and Redux Course - https://www.udemy.com/course/the-complete-react-native-and-redux-course/?couponCode=92ECD26E84B741B19F8E
+
+The Coding Interview Bootcamp: Algorithms + Data Structures - https://www.udemy.com/course/coding-interview-bootcamp-algorithms-and-data-structure/?couponCode=E5535A8D7F76042ADA87
+
+Machine Learning with JavaScript - https://www.udemy.com/course/machine-learning-with-javascript/?couponCode=0236EB0CE2B01BD26A75
+
+Node JS: Advanced Concepts - https://www.udemy.com/course/advanced-node-for-developers/?couponCode=423596CE77354BABCF8B
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+         
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+             
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
